@@ -1,0 +1,8 @@
+# Use official Node.js alpine image for lightness
+FROM node:20-alpine
+
+# Create a non-root user for security
+# Fixed uid, see SANDBOX_UID in backend/app/services/sandbox.py
+RUN adduser -D -u 10001 runner
+USER runner
+WORKDIR /workspace
