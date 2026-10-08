@@ -1,0 +1,11 @@
+# Tests, linters and type checking. Not installed in the Docker images.
+-r requirements.txt
+
+pytest==8.3.3
+pytest-asyncio==0.24.0
+aiosqlite==0.20.0  # the test suites run on in-memory SQLite
+pytest-cov==5.0.0
+httpx-ws==0.9.0  # in-process ASGI WebSocket client for testing the collab gateway
+ruff==0.7.2
+mypy==1.13.0
+bandit==1.7.10

@@ -1,0 +1,34 @@
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "N", "ASYNC", "S", "RUF"]
+ignore = [
+    "E501",   # line length handled by formatter
+    "B008",   # FastAPI Depends() in defaults is fine
+    "S101",   # asserts in tests are fine
+    "N818",   # exception naming not strict in this codebase
+]
+
+[tool.mypy]
+python_version = "3.12"
+plugins = ["pydantic.mypy"]
+ignore_missing_imports = true
+# Not `strict = true`: the codebase was never brought up to that bar (turning
+# it on produced ~110 errors, ~80% pure missing-annotation/bare-generic noise
+# with zero behavioral impact). check_untyped_defs still type-checks every
+# function body regardless of annotations, so real bugs (wrong attribute
+# access, incompatible assignments, bad call args) are still caught.
+check_untyped_defs = true
+warn_unused_ignores = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.coverage.run]
+# SQLAlchemy's async layer runs queries in greenlets; without this, coverage on
+# Python 3.12 (CI) misses every line after the first await in a request handler.
+concurrency = ["greenlet", "thread"]
