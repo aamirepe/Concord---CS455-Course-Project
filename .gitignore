@@ -1,0 +1,70 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Node
+node_modules/
+dist/
+.vite/
+
+# Env
+.env
+.env.local
+.env.production
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Build artifacts
+backend/alembic/versions/__pycache__/
+*.log
+# Root-level log dumps (not requirements.txt)
+/*.txt
+*.bak
+*.backup
+
+# Documentation and Guide files
+DEVELOPMENT_GUIDE.md
+LEARNING_ROADMAP.md
+DESIGN_WORKSPACE.md
+IMPLEMENTATION_PLAN_EXTENSIONS.md
+PROJECT_BLUEPRINT.md
+WORKSPACE_MASTERPLAN.md
+VERIFICATION_GUIDE.md
+DOCKER_GUIDE.md
+DOCKER_FILES_LOCATION.md
+IMPLEMENTATION_AUDIT.md
+
+# Local test and helper scripts
+/test_*.py
+/verify_*.py
+/repro_*.py
+repro.py
+setup_test_data.py
+config_ai*.py
+fix_and_config.py
+debug_projects.py
+update_file.py
+backend/scripts/
+
+
+# Test coverage output
+frontend/coverage/
+.coverage
+
+# Local pilot output (logs, feedback, check reports)
+pilot-results/
+
+# Browser e2e screenshots
+e2e/out/
