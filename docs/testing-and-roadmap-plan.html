@@ -1,0 +1,636 @@
+<title>Concord Testing Roadmap</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
+:root {
+  --bg: #f7f8fa;
+  --surface: #ffffff;
+  --surface-sunken: #eef0f4;
+  --text: #1b222c;
+  --text-dim: #5b6472;
+  --text-faint: #8891a0;
+  --border: #e1e4ea;
+  --border-strong: #cdd2db;
+  --accent: #1f6e5c;
+  --accent-soft: #e3f1ec;
+  --accent-strong: #14493d;
+  --done: #1f6e5c;
+  --done-bg: #e3f1ec;
+  --pending: #a8621b;
+  --pending-bg: #fbeee0;
+  --code-bg: #12151b;
+  --code-text: #d9dde4;
+  --shadow: 0 1px 2px rgba(20, 24, 32, 0.04), 0 8px 24px rgba(20, 24, 32, 0.05);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12151b;
+    --surface: #191d25;
+    --surface-sunken: #1f2430;
+    --text: #e4e8ef;
+    --text-dim: #a2aab8;
+    --text-faint: #707988;
+    --border: #2a3140;
+    --border-strong: #3a4457;
+    --accent: #4fbf9f;
+    --accent-soft: #1c332c;
+    --accent-strong: #7fd6bc;
+    --done: #4fbf9f;
+    --done-bg: #16352c;
+    --pending: #e0a35e;
+    --pending-bg: #3a2c17;
+    --code-bg: #0b0d11;
+    --code-text: #d9dde4;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.35);
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #12151b;
+  --surface: #191d25;
+  --surface-sunken: #1f2430;
+  --text: #e4e8ef;
+  --text-dim: #a2aab8;
+  --text-faint: #707988;
+  --border: #2a3140;
+  --border-strong: #3a4457;
+  --accent: #4fbf9f;
+  --accent-soft: #1c332c;
+  --accent-strong: #7fd6bc;
+  --done: #4fbf9f;
+  --done-bg: #16352c;
+  --pending: #e0a35e;
+  --pending-bg: #3a2c17;
+  --code-bg: #0b0d11;
+  --code-text: #d9dde4;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  font-size: 16px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+.page {
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 3.5rem 1.5rem 6rem;
+}
+
+.masthead {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  padding-bottom: 2.25rem;
+  margin-bottom: 2.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.eyebrow {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.75rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.eyebrow .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  display: inline-block;
+}
+
+h1 {
+  font-family: "Source Serif 4", Georgia, serif;
+  font-weight: 700;
+  font-size: clamp(2rem, 4vw, 2.7rem);
+  line-height: 1.15;
+  margin: 0;
+  text-wrap: balance;
+  color: var(--text);
+}
+
+.subhead {
+  font-size: 1.05rem;
+  color: var(--text-dim);
+  max-width: 62ch;
+  margin: 0;
+}
+
+.meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.8rem;
+  color: var(--text-faint);
+  margin-top: 0.5rem;
+}
+
+.meta-row strong { color: var(--text-dim); font-weight: 500; }
+
+nav.toc {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1.25rem 1.5rem;
+  margin-bottom: 3rem;
+  box-shadow: var(--shadow);
+}
+
+nav.toc .toc-label {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-bottom: 0.75rem;
+  display: block;
+}
+
+nav.toc ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  columns: 2;
+  column-gap: 2rem;
+}
+
+nav.toc li { break-inside: avoid; margin-bottom: 0.45rem; }
+
+nav.toc a {
+  color: var(--text-dim);
+  text-decoration: none;
+  font-size: 0.92rem;
+  display: flex;
+  gap: 0.5rem;
+}
+
+nav.toc a:hover { color: var(--accent); }
+nav.toc a .n { color: var(--text-faint); font-family: "IBM Plex Mono", monospace; font-size: 0.8rem; }
+
+section { margin-bottom: 3.25rem; }
+
+h2 {
+  font-family: "Source Serif 4", Georgia, serif;
+  font-weight: 600;
+  font-size: 1.55rem;
+  margin: 0 0 0.35rem;
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  text-wrap: balance;
+}
+
+h2 .idx {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.9rem;
+  color: var(--accent);
+  font-weight: 500;
+}
+
+h3 {
+  font-family: "IBM Plex Sans", sans-serif;
+  font-weight: 600;
+  font-size: 1.08rem;
+  margin: 1.75rem 0 0.6rem;
+  color: var(--text);
+}
+
+.lede {
+  color: var(--text-dim);
+  font-size: 0.98rem;
+  max-width: 68ch;
+  margin: 0 0 1.25rem;
+}
+
+p { max-width: 70ch; }
+p.body-copy { color: var(--text); }
+
+a { color: var(--accent); }
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1.4rem 1.6rem;
+  box-shadow: var(--shadow);
+}
+
+.card + .card { margin-top: 1rem; }
+
+.two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+@media (max-width: 680px) {
+  .two-col { grid-template-columns: 1fr; }
+  nav.toc ol { columns: 1; }
+}
+
+.gap-card {
+  border-left: 3px solid var(--pending);
+}
+
+.gap-card h4 {
+  margin: 0 0 0.4rem;
+  font-size: 0.98rem;
+  font-family: "IBM Plex Sans", sans-serif;
+  font-weight: 600;
+}
+
+.gap-card .path {
+  display: block;
+  margin-top: 0.5rem;
+}
+
+.gap-card p { margin: 0; font-size: 0.9rem; color: var(--text-dim); }
+
+code, .path {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.84em;
+  background: var(--surface-sunken);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.05em 0.4em;
+  color: var(--accent-strong);
+}
+
+pre {
+  background: var(--code-bg);
+  color: var(--code-text);
+  border-radius: 8px;
+  padding: 1rem 1.2rem;
+  overflow-x: auto;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.85rem;
+  line-height: 1.55;
+  margin: 0.75rem 0 0;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.table-wrap { overflow-x: auto; border-radius: 10px; box-shadow: var(--shadow); }
+
+th {
+  text-align: left;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  background: var(--surface-sunken);
+  padding: 0.7rem 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+td {
+  padding: 0.65rem 1rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+  color: var(--text);
+}
+
+tr:last-child td { border-bottom: none; }
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.72rem;
+  font-weight: 500;
+  padding: 0.15rem 0.55rem;
+  border-radius: 100px;
+  white-space: nowrap;
+}
+
+.status.done { background: var(--done-bg); color: var(--done); }
+.status.pending { background: var(--pending-bg); color: var(--pending); }
+
+ol.phase-list, ul.plain {
+  margin: 0.5rem 0 0;
+  padding-left: 1.3rem;
+}
+
+ol.phase-list li, ul.plain li { margin-bottom: 0.5rem; color: var(--text); }
+ul.plain li::marker { color: var(--text-faint); }
+
+.phase {
+  display: flex;
+  gap: 1.25rem;
+  padding: 1.5rem 0;
+  border-top: 1px solid var(--border);
+}
+
+.phase:first-of-type { border-top: none; padding-top: 0.5rem; }
+
+.phase .tag {
+  flex: 0 0 auto;
+  width: 6.5rem;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.75rem;
+  color: var(--accent);
+  padding-top: 0.15rem;
+}
+
+.phase .body { flex: 1; }
+
+.phase h3 { margin: 0 0 0.4rem; }
+
+.phase p { margin: 0 0 0.6rem; color: var(--text-dim); font-size: 0.93rem; }
+
+.file-list {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.82rem;
+  color: var(--text-dim);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.file-list span {
+  background: var(--surface-sunken);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.15rem 0.5rem;
+}
+
+.callout {
+  border: 1px solid var(--border-strong);
+  background: var(--accent-soft);
+  border-radius: 10px;
+  padding: 1.1rem 1.4rem;
+  font-size: 0.92rem;
+  color: var(--text);
+}
+
+.callout strong { color: var(--accent-strong); }
+
+footer {
+  margin-top: 4rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--border);
+  color: var(--text-faint);
+  font-size: 0.82rem;
+  font-family: "IBM Plex Mono", monospace;
+}
+</style>
+
+<div class="page">
+
+  <div class="masthead">
+    <div class="eyebrow"><span class="dot"></span>Concord &mdash; Planning Document</div>
+    <h1>Testing &amp; Development Roadmap</h1>
+    <p class="subhead">A read of the current repository state, what's proven versus assumed, and a sequenced path to close the verification gaps before extending the feature set.</p>
+    <div class="meta-row">
+      <span><strong>Scope:</strong> backend, worker, sandbox, frontend</span>
+      <span><strong>Status:</strong> planning only &mdash; no code changed</span>
+      <span><strong>Prepared</strong> 2026-09-19</span>
+    </div>
+  </div>
+
+  <nav class="toc">
+    <span class="toc-label">Contents</span>
+    <ol>
+      <li><a href="#what-it-is"><span class="n">01</span> What Concord is</a></li>
+      <li><a href="#current-state"><span class="n">02</span> Current test coverage</a></li>
+      <li><a href="#vv-status"><span class="n">03</span> V&amp;V traceability status</a></li>
+      <li><a href="#gaps"><span class="n">04</span> Concrete coverage gaps</a></li>
+      <li><a href="#test-plan"><span class="n">05</span> Testing implementation plan</a></li>
+      <li><a href="#beyond-testing"><span class="n">06</span> Beyond testing: open threads</a></li>
+      <li><a href="#sequencing"><span class="n">07</span> Recommended sequencing</a></li>
+    </ol>
+  </nav>
+
+  <section id="what-it-is">
+    <h2><span class="idx">01</span> What Concord is</h2>
+    <p class="lede">A CRDT-based collaborative Python IDE: browser clients co-edit files live over Yjs/pycrdt, run code in single-use sandboxed Docker containers, and step through a shared debugger with a single-driver model.</p>
+    <div class="two-col">
+      <div class="card">
+        <h3 style="margin-top:0">Stack</h3>
+        <p class="body-copy" style="font-size:0.92rem">React 18 + TypeScript + Vite + Monaco + Yjs on the client; FastAPI + SQLAlchemy async + Alembic + Postgres on the backend; Redis for the execution queue and pub/sub; a standalone worker pool driving sibling Docker containers for sandboxed execution.</p>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">Who it's for</h3>
+        <p class="body-copy" style="font-size:0.92rem">Students pairing on labs, instructors/TAs reviewing live without taking the editor, and course staff responsible for deployment, monitoring, and load behavior &mdash; per <code>docs/requirements.md</code>.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="current-state">
+    <h2><span class="idx">02</span> Current test coverage</h2>
+    <p class="lede">Backend has a real but narrow automated suite. Worker tests exist but never run in CI. Frontend has no test infrastructure at all.</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Layer</th><th>Tests</th><th>Runs in CI?</th><th>Covers</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>backend/tests/</code></td>
+            <td>~18 tests across 6 files</td>
+            <td><span class="status done">yes</span></td>
+            <td>Auth, breakpoint CRUD + permission, CRDT convergence (10&times;100 simulated edits), debug session creation, execution FSM transitions, viewer/member permission checks</td>
+          </tr>
+          <tr>
+            <td><code>worker/tests/test_sandbox_security.py</code></td>
+            <td>5 tests</td>
+            <td><span class="status pending">no</span></td>
+            <td>Network isolation, timeout kill, read-only fs, fork-bomb/pids-limit, image existence &mdash; all gated on <code>DOCKER_TESTS=1</code>, which CI never sets</td>
+          </tr>
+          <tr>
+            <td><code>frontend/</code></td>
+            <td>0</td>
+            <td><span class="status pending">n/a</span></td>
+            <td>No vitest/jest/cypress/playwright dependency, config, or test file anywhere. CI's frontend job only lints, type-checks, and builds.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="body-copy" style="margin-top:1rem; font-size:0.92rem">Fixture surface in <code>backend/tests/conftest.py</code> is minimal: an in-memory SQLite override, a per-test schema reset, an httpx ASGI client, and a <code>two_users</code> fixture. There are no fixtures for projects, files, executions, mocked Redis, mocked LLM providers, or a WebSocket test client &mdash; which is why whole feature areas below have no tests at all rather than partial ones.</p>
+  </section>
+
+  <section id="vv-status">
+    <h2><span class="idx">03</span> V&amp;V traceability status</h2>
+    <p class="lede"><code>docs/vv-report.md</code> is a requirement-to-test traceability matrix, not a narrative plan. Roughly half the non-functional requirements and several functional ones have no completed automated verification &mdash; they're either unrun or manual-only today.</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Requirement</th><th>Status</th><th>Note</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>FR1&ndash;FR3, FR5, FR7, FR10 &middot; NFR4, NFR7</td><td><span class="status done">automated</span></td><td>Auth, sessions, CRDT convergence, sandbox security, permissions, CI gate</td></tr>
+          <tr><td>FR6 (snapshot restore), FR8 (debugger CRUD)</td><td><span class="status pending">manual only</span></td><td>Stepping itself is not exercised by any test</td></tr>
+          <tr><td>FR4 (edit latency &lt;300ms p99)</td><td><span class="status pending">unrun</span></td><td>Report says "to fill after running" <code>scripts/load_test.py</code></td></tr>
+          <tr><td>FR9 (debug state broadcast)</td><td><span class="status pending">manual only</span></td><td>No automated multi-client debug broadcast test</td></tr>
+          <tr><td>FR11 (checkpoint timing), FR12 (chaos recovery)</td><td><span class="status pending">manual</span></td><td><code>scripts/chaos.py</code> exists but isn't part of CI or <code>make test</code></td></tr>
+          <tr><td>NFR1&ndash;3 (latency, concurrency, queue wait)</td><td><span class="status pending">unrun</span></td><td>No recorded load-test results</td></tr>
+          <tr><td>NFR5 (TLS)</td><td><span class="status pending">deploy-dependent</span></td><td>Required for the grading demo specifically</td></tr>
+          <tr><td>NFR6 (cold restart &lt;5s)</td><td><span class="status pending">manual</span></td><td>No automated restart-recovery test</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout" style="margin-top:1.25rem">
+      <strong>Course-rubric note:</strong> <code>docs/vv-report.md</code> explicitly labels a maintenance/change worked example and a bug&rarr;root-cause&rarr;fix&rarr;regression-test example as <em>required</em> deliverables. Both exist today (the multi-file support change, and the CRDT full-doc-push latency bug fixed in <code>gateway.py::collab_socket</code> with regression coverage in <code>test_concurrent_edits.py</code>) but read as single examples where a rubric may expect more depth or additional instances.
+    </div>
+  </section>
+
+  <section id="gaps">
+    <h2><span class="idx">04</span> Concrete coverage gaps</h2>
+    <p class="lede">Ordered roughly by risk &times; how central the code is to the product's core claims (real-time correctness, sandbox safety, permission enforcement).</p>
+
+    <div class="card gap-card">
+      <h4>Realtime WebSocket gateway</h4>
+      <p>The documented wire protocol (hello / sync_step1 / awareness / exec_event_ack, binary vs. JSON framing) and the room-lock serialization behavior have no integration test that opens an actual WebSocket. <code>test_concurrent_edits.py</code> exercises CRDT math directly against a simulated fanout, not the real gateway.</p>
+      <span class="path"><span class="file-list"><span>backend/app/realtime/gateway.py</span><span>backend/app/realtime/manager.py</span></span></span>
+    </div>
+
+    <div class="card gap-card">
+      <h4>LLM assistant feature</h4>
+      <p>Zero tests for API-key encryption/decryption, Redis-based rate limiting with fallback, provider dispatch, or either adapter &mdash; despite the assistant router being the largest in the app.</p>
+      <span class="path"><span class="file-list"><span>backend/app/llm/manager.py</span><span>backend/app/llm/adapters.py</span><span>backend/app/api/assistant.py</span></span></span>
+    </div>
+
+    <div class="card gap-card">
+      <h4>Worker execution loop</h4>
+      <p>The most complex concurrency in the repo &mdash; BRPOP consumption, workspace mounting from DB, concurrent cancel-listening via <code>asyncio.wait</code>, state-transition publishing &mdash; has no unit tests at all. Only the resulting container's security properties are tested, and only under <code>DOCKER_TESTS=1</code>.</p>
+      <span class="path"><span class="file-list"><span>worker/app/worker.py</span></span></span>
+    </div>
+
+    <div class="card gap-card">
+      <h4>Project/file/folder CRUD surface</h4>
+      <p>Projects, files, folders, invitations, snapshots, and metrics endpoints have no dedicated test files &mdash; they're only touched incidentally as setup inside other tests, meaning success paths are implied but failure paths (permissions, validation, not-found) are not.</p>
+      <span class="path"><span class="file-list"><span>api/projects.py</span><span>api/files.py</span><span>api/folders.py</span><span>api/invitations.py</span><span>api/snapshots.py</span><span>api/metrics.py</span></span></span>
+    </div>
+
+    <div class="card gap-card">
+      <h4>Background loops</h4>
+      <p>Checkpoint persistence and orphaned-room sweeping run continuously in production but are never exercised in isolation.</p>
+      <span class="path"><span class="file-list"><span>realtime/checkpoint.py</span><span>realtime/orphan_sweep.py</span><span>realtime/execution_queue.py</span></span></span>
+    </div>
+
+    <div class="card gap-card">
+      <h4>Debug protocol layer</h4>
+      <p><code>test_debug.py</code> covers API-level session creation and linking only. <code>DapClient</code> and <code>DebugManager</code> have no isolated unit tests for state handling or DAP protocol correctness.</p>
+      <span class="path"><span class="file-list"><span>backend/app/debug/dap.py</span><span>backend/app/debug/manager.py</span></span></span>
+    </div>
+
+    <div class="card gap-card">
+      <h4>Multi-language runtime paths</h4>
+      <p>Only the Python execution path is exercised. C++ and Node.js build/entrypoint configs in the runtime registry are untested, and there are no negative-path tests for Docker API errors or malformed CRDT updates anywhere in the suite.</p>
+      <span class="path"><span class="file-list"><span>backend/app/runtime/registry.py</span></span></span>
+    </div>
+
+    <div class="card gap-card">
+      <h4>Frontend &mdash; everything</h4>
+      <p>No test runner is installed. Nothing verifies the Editor/Yjs binding, the WebSocket sync client, the file tree, or page-level flows (login, dashboard, session). This is the single largest blind spot in the repo relative to how much user-facing logic lives there.</p>
+      <span class="path"><span class="file-list"><span>frontend/src/components/Editor.tsx</span><span>frontend/src/lib/ws.ts</span><span>frontend/src/pages/SessionPage.tsx</span></span></span>
+    </div>
+  </section>
+
+  <section id="test-plan">
+    <h2><span class="idx">05</span> Testing implementation plan</h2>
+    <p class="lede">Sequenced so each phase either closes a rubric-visible V&amp;V gap or unblocks the next phase's fixtures. Nothing here has been implemented &mdash; this is the order to implement in.</p>
+
+    <div class="phase">
+      <div class="tag">PHASE 1</div>
+      <div class="body">
+        <h3>Wire up what already exists</h3>
+        <p>Before writing new tests, make the existing ones count. Add a <code>worker</code> job to <code>.github/workflows/ci.yml</code> that runs with a real Docker daemon and <code>DOCKER_TESTS=1</code>, so <code>test_sandbox_security.py</code> actually executes on every PR instead of silently skipping. Add a coverage floor (<code>--cov-fail-under</code>) to the backend CI step so coverage can't silently regress while later phases add tests.</p>
+      </div>
+    </div>
+
+    <div class="phase">
+      <div class="tag">PHASE 2</div>
+      <div class="body">
+        <h3>Expand backend fixtures</h3>
+        <p>Extend <code>conftest.py</code> with fixtures for a project + file + folder graph, a fake/queued execution, a mocked Redis client, and a mocked LLM provider. This is the prerequisite for nearly every gap in Section 04 &mdash; without it, each new test file re-implements its own setup.</p>
+      </div>
+    </div>
+
+    <div class="phase">
+      <div class="tag">PHASE 3</div>
+      <div class="body">
+        <h3>Close the highest-risk backend gaps</h3>
+        <p>In order: a real WebSocket integration test against <code>gateway.py</code> (covers FR9's debug broadcast requirement as a side effect), project/file/folder/invitation/snapshot CRUD tests including permission-denied paths, and worker unit tests for the execution loop with a faked Docker client. These three map directly to unresolved FR/NFR rows in Section 03.</p>
+      </div>
+    </div>
+
+    <div class="phase">
+      <div class="tag">PHASE 4</div>
+      <div class="body">
+        <h3>LLM assistant &amp; debug protocol</h3>
+        <p>Unit-test <code>LLMManager</code>'s key encryption and rate-limit fallback with a mocked Redis, and each adapter with a mocked HTTP layer. Unit-test <code>DapClient</code>/<code>DebugManager</code> state handling independent of the API layer.</p>
+      </div>
+    </div>
+
+    <div class="phase">
+      <div class="tag">PHASE 5</div>
+      <div class="body">
+        <h3>Stand up frontend testing from zero</h3>
+        <p>Add Vitest + React Testing Library (matches the existing Vite setup with least friction), starting with <code>lib/api.ts</code> and <code>lib/ws.ts</code> as pure-logic units, then component tests for <code>FileTree</code> and <code>ErrorBoundary</code>. Defer full <code>Editor.tsx</code>/Yjs binding tests and any E2E tool (Playwright) until this foundation is in place &mdash; they're highest-value but also highest-setup-cost.</p>
+      </div>
+    </div>
+
+    <div class="phase">
+      <div class="tag">PHASE 6</div>
+      <div class="body">
+        <h3>Turn manual V&amp;V rows into recorded runs</h3>
+        <p>Run <code>scripts/load_test.py</code> and record actual numbers against FR4/NFR1&ndash;3 in the V&amp;V report. Run <code>scripts/chaos.py</code> against FR12 and document the outcome. Neither needs to become a CI gate immediately &mdash; recording a real result is the gap, not automation.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="beyond-testing">
+    <h2><span class="idx">06</span> Beyond testing: open threads</h2>
+    <p class="lede">Findings from the docs pass that affect scoping but aren't testing work themselves.</p>
+    <ul class="plain">
+      <li><strong>Debug mode isn't fully wired end-to-end</strong> &mdash; <code>docs/HOW_TO_RUN.md</code> notes that <code>debug=True</code> execution isn't yet connected through the Run button; only breakpoint UI/persistence is verified. This should probably land before or alongside the Phase 3 WebSocket/debug tests, or the new tests will be testing a path users can't actually reach yet.</li>
+      <li><strong>Two design patterns are explicitly deferred</strong> per <code>docs/design-patterns.md</code>: a Strategy seam at <code>realtime/crdt.py</code> for pluggable CRDT algorithms, and a Factory seam at <code>app/services/sandbox.py</code> for multi-language execution (referred to there as "Feature 17"). Worth confirming whether either is in scope for remaining coursework before Phase 4/5 testing work locks in the current interfaces.</li>
+      <li><strong><code>docs/build-spec.md</code> is referenced but does not exist</strong> &mdash; README.md points to a Phase 0&ndash;10 build-order document that isn't in the repo. Worth checking whether it was lost, renamed, or never committed, since it may be the canonical source for "what's left."</li>
+      <li><strong>Stray file in the frontend</strong> &mdash; <code>frontend/src/pages/SessionPage.tsx`</code> (literal backtick in the filename, 9.4KB) sits alongside the real 21.6KB <code>SessionPage.tsx</code>. Not a testing concern, but worth a one-line cleanup so it doesn't get accidentally imported or confused for a WIP file.</li>
+      <li><strong>NFR5 (TLS) is graded, not just functional</strong> &mdash; explicitly called out as required for the grading demo. Confirm the deploy checklist in <code>docs/runbook.md</code> covers this before the demo date rather than at test time.</li>
+    </ul>
+  </section>
+
+  <section id="sequencing">
+    <h2><span class="idx">07</span> Recommended sequencing</h2>
+    <p class="lede">If only one thing happens next, it should be Phase 1 &mdash; it's near-zero effort (CI config, not new tests) and immediately turns five already-written tests from decorative to real. Everything else compounds on Phase 2's fixtures, so resist starting Phase 3+ work in parallel without it.</p>
+    <div class="callout">
+      <strong>Suggested order:</strong> Phase 1 &rarr; Phase 2 &rarr; Phase 3 &rarr; (Phase 4 and Phase 5 can run in parallel, different surface areas) &rarr; Phase 6 last, once there's enough automated coverage that a load/chaos run is measuring the real system rather than a system that still has open correctness gaps.
+    </div>
+  </section>
+
+  <footer>
+    concord / planning &mdash; testing-and-roadmap-plan &mdash; no code modified during this pass
+  </footer>
+
+</div>
