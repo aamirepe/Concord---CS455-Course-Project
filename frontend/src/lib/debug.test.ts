@@ -37,6 +37,14 @@ describe("applyDebugEvent", () => {
     expect(s.message).toBe("The program finished (exit code 0).");
   });
 
+  it("ignores pauses from another execution while a session is active", () => {
+    const active = applyDebugEvent(emptyDebug, { type: "debug_started", execution_id: 7, file_id: 10, path: "main.py" });
+    const foreignPause = { ...paused, execution_id: 8 };
+    expect(applyDebugEvent(active, foreignPause)).toBe(active);
+    const stopped = applyDebugEvent(active, paused);
+    expect(applyDebugEvent(stopped, foreignPause)).toBe(stopped);
+  });
+
   it("explains why a session ended", () => {
     const end = (reason: string, extra = {}) => applyDebugEvent(emptyDebug, { type: "debug_stopped", execution_id: 1, reason, ...extra }).message;
     expect(end("stopped", { by: "dave" })).toBe("dave stopped the debugger.");

@@ -58,6 +58,7 @@ export function applyDebugEvent(state: DebugState, e: Event): DebugState {
         message: `${e.username ?? "Someone"} started debugging ${e.path}`,
       };
     case "debug_paused": {
+      if (state.active && state.active.execution_id !== id) return state;
       const p = e as unknown as PausedState;
       const active = state.active?.execution_id === id ? state.active
         : { execution_id: id as number, file_id: p.file_id ?? 0, path: p.path ?? "" };
