@@ -54,6 +54,18 @@ describe("DebugPanel", () => {
     expect(screen.queryByText("total")).toBeNull();
   });
 
+  it("collapses and reopens loaded Locals without requesting adapter variables", () => {
+    const { onExpand } = renderPanel();
+    const locals = screen.getByRole("button", { name: /locals/i });
+    fireEvent.click(locals);
+    expect(locals).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("total")).toBeNull();
+    fireEvent.click(locals);
+    expect(locals).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("total")).toBeInTheDocument();
+    expect(onExpand).not.toHaveBeenCalled();
+  });
+
   it("lets people without the debugger role watch but not step", () => {
     renderPanel(paused, false);
     for (const name of [/continue/i, /step over/i, /stop/i]) expect(screen.getByRole("button", { name })).toBeDisabled();

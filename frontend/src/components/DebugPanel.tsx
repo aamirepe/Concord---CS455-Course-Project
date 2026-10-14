@@ -32,7 +32,7 @@ export default function DebugPanel({ state, canStep, onCommand, onExpand, onSele
       if (next.has(ref)) next.delete(ref);
       else {
         next.add(ref);
-        if (!state.children[ref]) onExpand(ref);
+        if (ref > 0 && !state.children[ref]) onExpand(ref);
       }
       return next;
     });
