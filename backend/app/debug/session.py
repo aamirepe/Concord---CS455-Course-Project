@@ -189,7 +189,8 @@ class DebugRun:
                     elif kind == "event":
                         finished = await self._handle_event(value) or finished
                     else:
-                        idle_since = time.monotonic()
+                        if value.get("command") in ("continue", "next", "stepIn", "stepOut"):
+                            idle_since = time.monotonic()
                         if value.get("command") == "stop":
                             reason, stopped_by, finished = "stopped", value.get("username"), True
                         else:

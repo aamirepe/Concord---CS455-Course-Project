@@ -6,7 +6,9 @@ a client that awaits each request in turn would hang here.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -209,6 +211,30 @@ async def test_stop_cancel_idle_and_errors():
     outcome = await asyncio.wait_for(run.run(), 5)
     assert outcome.reason == "error" and outcome.error
     assert events[-1]["type"] == "debug_stopped" and events[-1]["error"]
+
+
+@pytest.mark.asyncio
+async def test_inspecting_variables_and_frames_does_not_reset_idle_timeout(monkeypatch):
+    clock = [0.0]
+    monkeypatch.setattr("app.debug.session.time", SimpleNamespace(monotonic=lambda: clock[0]))
+    run, commands, events, _ = _session(FakeAdapter())
+    task = asyncio.create_task(run.run())
+    try:
+        await _until(events, "debug_paused")
+        clock[0] = 100.0
+        commands.put_nowait({"command": "variables", "ref": 9})
+        await _until(events, "debug_variables")
+        clock[0] = 179.0
+        commands.put_nowait({"command": "frame", "frame_id": 7})
+        await _until(events, "debug_frame")
+        clock[0] = 181.0
+        commands.put_nowait({"command": "variables", "ref": 9})
+        assert (await asyncio.wait_for(asyncio.shield(task), 1)).reason == "idle"
+    finally:
+        if not task.done():
+            task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
 
 
 @pytest.mark.asyncio
