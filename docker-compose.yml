@@ -1,0 +1,112 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-concord}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-concord-dev-password}
+      POSTGRES_DB: ${POSTGRES_DB:-concord}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-concord}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    volumes:
+      # Sandbox containers need Docker access - we mount the socket so workers
+      # can launch sibling containers (sibling is faster than Docker-in-Docker).
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Mount backend source for instant code reloading during development
+      - ./backend:/app
+      # Pilot/ops scripts (scripts/pilot.sh runs scripts/pilot.py in here)
+      - ./scripts:/scripts:ro
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+
+  worker:
+    build:
+      context: .          # CHANGED FROM ./worker
+      dockerfile: worker/Dockerfile
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /tmp:/tmp
+      # Mount backend and worker source for instant code reloading during development
+      - ./backend/app:/app/app
+      - ./worker/app:/app/worker_app
+    deploy:
+      replicas: 2
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
+        VITE_WS_URL: ${VITE_WS_URL:-ws://localhost:8000}
+    env_file: .env
+    depends_on:
+      - backend
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend/src:/app/src
+    command: npm run dev -- --host
+
+  # Sandbox image builders
+  # These services don't stay running; they just ensure the images are built on the host
+  sandbox-python:
+    build:
+      context: ./sandbox
+      dockerfile: Dockerfile
+    image: concord-sandbox:latest
+
+  sandbox-cpp:
+    build:
+      context: ./sandbox
+      dockerfile: Dockerfile.cpp
+    image: concord-sandbox-cpp:latest
+
+  sandbox-nodejs:
+    build:
+      context: ./sandbox
+      dockerfile: Dockerfile.nodejs
+    image: concord-sandbox-nodejs:latest
+
+volumes:
+  pgdata:
+  redisdata:

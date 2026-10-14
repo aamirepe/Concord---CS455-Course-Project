@@ -1,0 +1,8 @@
+# Static server for the production build (frontend/Dockerfile.prod).
+# Unknown paths fall back to index.html so client-side routes survive a reload.
+:80 {
+    root * /srv
+    encode zstd gzip
+    try_files {path} /index.html
+    file_server
+}
