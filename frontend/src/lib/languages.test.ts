@@ -10,6 +10,7 @@ describe("languages", () => {
     expect(monacoLanguage("run", "nodejs")).toBe("javascript");
     expect(monacoLanguage("x.weird", "cpp")).toBe("cpp");
     expect(monacoLanguage("x.weird")).toBe("plaintext");
+    expect(monacoLanguage("notes.constructor")).toBe("plaintext");
   });
 
   it("knows what can be run and debugged", () => {

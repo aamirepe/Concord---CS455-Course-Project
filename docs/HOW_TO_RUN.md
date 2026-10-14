@@ -290,7 +290,7 @@ install. Restart the terminal.
 ### "port 5432 is already in use"
 You have a Postgres running locally on the same port Docker wants to use.
 Either stop your local Postgres, or change the port mapping in
-`docker-compose.yml` (change `"5432:5432"` to `"5432:5433"` etc.).
+`docker-compose.yml` (change `"5432:5432"` to `"5433:5432"` etc.).
 
 ### "permission denied while trying to connect to the Docker daemon"
 On Linux, your user isn't in the `docker` group. Run:

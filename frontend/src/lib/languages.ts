@@ -12,7 +12,7 @@ const BY_EXTENSION: Record<string, string> = {
 /** Monaco's language id for a file (the backend calls JavaScript "nodejs"). */
 export function monacoLanguage(path: string, language?: string): string {
   const ext = path.includes(".") ? path.split(".").pop()!.toLowerCase() : "";
-  if (BY_EXTENSION[ext]) return BY_EXTENSION[ext];
+  if (Object.prototype.hasOwnProperty.call(BY_EXTENSION, ext)) return BY_EXTENSION[ext];
   if (language === "nodejs") return "javascript";
   return language && language !== "plaintext" ? language : "plaintext";
 }

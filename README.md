@@ -146,13 +146,13 @@ More detail: [docs/architecture.md](docs/architecture.md) and [docs/HOW_IT_WORKS
 
 ```bash
 # Backend: unit + API + WebSocket tests (in-memory SQLite, no services needed)
-cd backend && pytest --cov=app
+(cd backend && pytest --cov=app)
 
 # Worker; DOCKER_TESTS=1 also runs the real sandbox containers
 PYTHONPATH=backend DOCKER_TESTS=1 pytest worker/tests --import-mode=importlib
 
 # Frontend: Vitest + React Testing Library with coverage
-cd frontend && npm run coverage
+(cd frontend && npm run coverage)
 
 # Against a running stack (see "Try it" above)
 scripts/pilot.sh check

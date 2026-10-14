@@ -9,7 +9,7 @@
 ## First-time setup
 
 ```bash
-git clone https://github.com/YOUR-ORG/concord.git
+git clone https://github.com/aamirepe/Concord---CS455-Course-Project.git concord
 cd concord
 cp .env.example .env
 docker compose up -d
