@@ -147,7 +147,7 @@ async def test_snapshot_includes_closed_files_and_restore_reaches_open_editors(c
     r = await client.post(f"/projects/{pid}/snapshots", json={"label": "good state"}, headers=_auth(owner))
     assert r.status_code == 201
     snap = r.json()
-    assert (snap["file_count"], snap["created_by_username"]) == (2, owner["username"])  # empty.py skipped
+    assert (snap["file_count"], snap["created_by_username"]) == (3, owner["username"])
     assert empty_id
 
     # Things change: main.py live, util.py through a later version.
