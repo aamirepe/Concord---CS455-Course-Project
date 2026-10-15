@@ -22,7 +22,7 @@ from app.models import (
     User,
 )
 from app.realtime.checkpoint import save_room
-from app.realtime.crdt import doc_from_bytes, doc_to_bytes, doc_to_text
+from app.realtime.crdt import doc_from_bytes, doc_to_bytes, doc_to_text, new_doc
 from app.realtime.manager import room_manager
 from app.realtime.rooms import open_room, replace_text
 from app.schemas import SnapshotCreate, SnapshotOut, SnapshotRestoreOut
@@ -58,8 +58,9 @@ async def _take_snapshot(db: AsyncSession, project_id: int, label: str, user_id:
                 .order_by(DocumentVersion.version_number.desc())
                 .limit(1)
             )).scalar_one_or_none()
-        if content:  # never edited: nothing to keep
-            db.add(SnapshotFile(snapshot_id=snapshot.id, file_id=file_id, content=content))
+        if content is None:  # never opened: its saved state is the empty document
+            content = doc_to_bytes(new_doc())
+        db.add(SnapshotFile(snapshot_id=snapshot.id, file_id=file_id, content=content))
     return snapshot
 
 
