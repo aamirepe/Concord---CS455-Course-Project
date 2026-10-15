@@ -607,16 +607,14 @@ export default function SessionPage() {
   async function handleAddMember() {
     if (!project) return;
 
-    if (memberForm.userId === "") {
+    const entered = memberForm.userId.trim();
+    if (entered === "") {
       toast("Please enter a User ID or Username.", "error");
       return;
     }
 
-    const userId = Number(memberForm.userId);
-    if (Number.isNaN(userId)) {
-      toast("Please enter a numeric User ID.", "error");
-      return;
-    }
+    // Digits are a user ID; anything else is looked up as a username.
+    const userId = /^\d+$/.test(entered) ? Number(entered) : entered;
 
     try {
       await api.addProjectMember(project.id, userId, memberForm.role);

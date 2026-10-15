@@ -116,7 +116,7 @@ describe("SessionPage", () => {
     expect(typeof (api.addProjectMember as any).mock.calls[0][1]).toBe("number");
   });
 
-  it("rejects a non-numeric User ID with a message instead of sending NaN", async () => {
+  it("sends a username as text so the server can look it up", async () => {
     mockConnectProject();
     vi.spyOn(api, "addProjectMember").mockResolvedValue({ message: "added" });
 
@@ -126,11 +126,10 @@ describe("SessionPage", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /members/i }));
     fireEvent.click(await screen.findByRole("button", { name: /add member/i }));
-    fireEvent.change(screen.getByPlaceholderText(/e\.g\. 123 or username/i), { target: { value: "not-a-number" } });
+    fireEvent.change(screen.getByPlaceholderText(/e\.g\. 123 or username/i), { target: { value: " test_admin " } });
     fireEvent.click(screen.getByRole("button", { name: /^add member$/i }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("Please enter a numeric User ID.");
-    expect(api.addProjectMember).not.toHaveBeenCalled();
+    await waitFor(() => expect(api.addProjectMember).toHaveBeenCalledWith(1, "test_admin", "viewer"));
   });
 
   it("onStructuralUpdate: WORKSPACE_FILE_CREATED adds the new file to the tree", async () => {
