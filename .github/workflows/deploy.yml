@@ -1,0 +1,141 @@
+name: deploy
+
+# Runs after the "ci" workflow succeeds on main, or by hand. It never deploys a
+# commit whose tests failed. Until the secrets below are configured it skips
+# with a notice instead of failing every push.
+#
+# Required repository secrets:
+#   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY  push to ECR
+#   ECR_REPO_BACKEND, ECR_REPO_FRONTEND, ECR_REPO_WORKER
+#   CONCORD_DOMAIN                            public host name, e.g. concord.example.com
+#   DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY  the server
+# The server needs the repo cloned at ~/concord, a filled-in ~/concord/.env,
+# Docker with the compose plugin, and the AWS CLI with permission to pull from ECR.
+
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-1
+  # workflow_run starts on the default branch's latest commit; deploy the one CI tested.
+  DEPLOY_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+jobs:
+  check:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    outputs:
+      ready: ${{ steps.secrets.outputs.ready }}
+    steps:
+      - id: secrets
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          ECR_REPO_BACKEND: ${{ secrets.ECR_REPO_BACKEND }}
+          ECR_REPO_FRONTEND: ${{ secrets.ECR_REPO_FRONTEND }}
+          ECR_REPO_WORKER: ${{ secrets.ECR_REPO_WORKER }}
+          CONCORD_DOMAIN: ${{ secrets.CONCORD_DOMAIN }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          missing=""
+          for name in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY ECR_REPO_BACKEND ECR_REPO_FRONTEND \
+                      ECR_REPO_WORKER CONCORD_DOMAIN DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY; do
+            [ -n "${!name}" ] || missing="$missing $name"
+          done
+          if [ -n "$missing" ]; then
+            echo "::notice title=Deploy skipped::missing secrets:$missing"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  build-and-push:
+    needs: check
+    if: needs.check.outputs.ready == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      registry: ${{ steps.ecr.outputs.registry }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.DEPLOY_SHA }}
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+          # The registry URL contains the account ID; masked, GitHub drops it from
+          # job outputs and the deploy job would get an empty registry.
+          mask-aws-account-id: false
+      - name: Login to ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+        with:
+          mask-password: "true"
+      - name: Build and push backend
+        env:
+          IMAGE: ${{ steps.ecr.outputs.registry }}/${{ secrets.ECR_REPO_BACKEND }}:${{ env.DEPLOY_SHA }}
+        run: |
+          docker build -t "$IMAGE" -f backend/Dockerfile backend
+          docker push "$IMAGE"
+      - name: Build and push worker
+        env:
+          IMAGE: ${{ steps.ecr.outputs.registry }}/${{ secrets.ECR_REPO_WORKER }}:${{ env.DEPLOY_SHA }}
+        run: |
+          docker build -t "$IMAGE" -f worker/Dockerfile .
+          docker push "$IMAGE"
+      - name: Build and push frontend
+        env:
+          IMAGE: ${{ steps.ecr.outputs.registry }}/${{ secrets.ECR_REPO_FRONTEND }}:${{ env.DEPLOY_SHA }}
+          DOMAIN: ${{ secrets.CONCORD_DOMAIN }}
+        run: |
+          docker build -t "$IMAGE" -f frontend/Dockerfile.prod \
+            --build-arg VITE_API_URL="https://$DOMAIN/api" \
+            --build-arg VITE_WS_URL="wss://$DOMAIN" frontend
+          docker push "$IMAGE"
+
+  deploy:
+    needs: [check, build-and-push]
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH into host and deploy
+        uses: appleboy/ssh-action@v1
+        env:
+          REGISTRY: ${{ needs.build-and-push.outputs.registry }}
+          BACKEND_IMAGE: ${{ needs.build-and-push.outputs.registry }}/${{ secrets.ECR_REPO_BACKEND }}:${{ env.DEPLOY_SHA }}
+          WORKER_IMAGE: ${{ needs.build-and-push.outputs.registry }}/${{ secrets.ECR_REPO_WORKER }}:${{ env.DEPLOY_SHA }}
+          FRONTEND_IMAGE: ${{ needs.build-and-push.outputs.registry }}/${{ secrets.ECR_REPO_FRONTEND }}:${{ env.DEPLOY_SHA }}
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          envs: REGISTRY,BACKEND_IMAGE,WORKER_IMAGE,FRONTEND_IMAGE,DEPLOY_SHA,AWS_REGION
+          script: |
+            set -eu
+            cd ~/concord
+            git fetch --quiet origin
+            git checkout --quiet "$DEPLOY_SHA"
+            # .env.deploy pins the images; deploy/compose.sh loads it (see docs/runbook.md).
+            printf 'BACKEND_IMAGE=%s\nWORKER_IMAGE=%s\nFRONTEND_IMAGE=%s\n' \
+              "$BACKEND_IMAGE" "$WORKER_IMAGE" "$FRONTEND_IMAGE" > .env.deploy
+            aws ecr get-login-password --region "$AWS_REGION" \
+              | docker login --username AWS --password-stdin "$REGISTRY"
+            # The worker starts sandboxes from these local images.
+            docker build -q -t concord-sandbox:latest ./sandbox
+            docker build -q -t concord-sandbox-cpp:latest -f sandbox/Dockerfile.cpp ./sandbox
+            docker build -q -t concord-sandbox-nodejs:latest -f sandbox/Dockerfile.nodejs ./sandbox
+            ./deploy/compose.sh pull
+            ./deploy/compose.sh up -d --remove-orphans
+            docker image prune -f
