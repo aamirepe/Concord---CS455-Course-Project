@@ -9,11 +9,12 @@ import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.db.session import AsyncSessionLocal
-from app.models import Execution, ExecutionStatus
+from app.models import DebugSession, DebugStatus, Execution, ExecutionStatus
 from app.realtime.execution_queue import signal_cancel
 
 log = logging.getLogger(__name__)
@@ -32,11 +33,21 @@ async def sweep_once(db: AsyncSession) -> int:
 
     Returns the number of executions marked failed.
     """
-    threshold_time = datetime.now(UTC) - ORPHAN_THRESHOLD
+    now = datetime.now(UTC)
+    threshold_time = now - ORPHAN_THRESHOLD
+    # The debugger has a longer total lifetime than a normal run. Give it
+    # that configured lifetime plus the normal recovery window for startup
+    # and teardown; stepping affects its idle timer, not this total limit.
+    debug_threshold_time = threshold_time - timedelta(seconds=get_settings().sandbox_debug_timeout_seconds)
+    active_debug = select(DebugSession.id).where(
+        DebugSession.execution_id == Execution.id,
+        DebugSession.status.in_((DebugStatus.ACTIVE, DebugStatus.PAUSED)),
+    ).exists()
 
     stmt = select(Execution).where(
         Execution.status.in_(ACTIVE_STATUSES),
         Execution.started_at < threshold_time,
+        or_(~active_debug, Execution.started_at < debug_threshold_time),
     )
     result = await db.execute(stmt)
     orphaned_executions = result.scalars().all()

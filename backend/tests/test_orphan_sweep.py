@@ -9,13 +9,13 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import app.realtime.orphan_sweep as orphan_sweep_module
 import pytest
+from app.core.config import get_settings
+from app.models import DebugSession, DebugStatus, Execution, ExecutionStatus
+from app.realtime.orphan_sweep import ORPHAN_THRESHOLD, sweep_once
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
-
-import app.realtime.orphan_sweep as orphan_sweep_module
-from app.models import Execution, ExecutionStatus
-from app.realtime.orphan_sweep import ORPHAN_THRESHOLD, sweep_once
 
 
 @pytest.fixture(autouse=True)
@@ -140,3 +140,58 @@ async def test_sweep_keeps_db_change_when_cancel_signal_fails(
     assert count == 1
     await db.refresh(stale)
     assert stale.status == ExecutionStatus.FAILED
+
+
+async def _debug_execution(db, project, age, debug_status=DebugStatus.ACTIVE):
+    execution = Execution(
+        project_id=project["id"], file_id=project["file_id"],
+        status=ExecutionStatus.RUNNING, started_at=datetime.now(UTC) - age,
+    )
+    db.add(execution)
+    await db.flush()
+    db.add(DebugSession(execution_id=execution.id, project_id=project["id"],
+                        started_by=project["owner"]["id"], status=debug_status))
+    await db.commit()
+    return execution
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("debug_status", [DebugStatus.ACTIVE, DebugStatus.PAUSED])
+async def test_sweep_preserves_live_debug_session_beyond_five_minutes(
+    db, project, cancelled, debug_status,
+):
+    execution = await _debug_execution(db, project, timedelta(minutes=6), debug_status)
+    assert await sweep_once(db) == 0
+    await db.refresh(execution)
+    assert execution.status == ExecutionStatus.RUNNING
+    assert execution.finished_at is None
+    assert cancelled == []
+
+
+@pytest.mark.asyncio
+async def test_sweep_respects_configured_debug_timeout(db, project, cancelled, monkeypatch):
+    monkeypatch.setattr(get_settings(), "sandbox_debug_timeout_seconds", 20 * 60)
+    execution = await _debug_execution(db, project, timedelta(minutes=16))
+    assert await sweep_once(db) == 0
+    await db.refresh(execution)
+    assert execution.status == ExecutionStatus.RUNNING
+    assert cancelled == []
+
+
+@pytest.mark.asyncio
+async def test_sweep_recovers_debug_run_after_timeout_and_recovery_grace(db, project, cancelled):
+    age = timedelta(seconds=get_settings().sandbox_debug_timeout_seconds) + ORPHAN_THRESHOLD + timedelta(minutes=1)
+    execution = await _debug_execution(db, project, age)
+    assert await sweep_once(db) == 1
+    await db.refresh(execution)
+    assert execution.status == ExecutionStatus.FAILED
+    assert cancelled == [execution.id]
+
+
+@pytest.mark.asyncio
+async def test_stopped_debug_session_does_not_protect_stale_execution(db, project, cancelled):
+    execution = await _debug_execution(db, project, timedelta(minutes=6), DebugStatus.STOPPED)
+    assert await sweep_once(db) == 1
+    await db.refresh(execution)
+    assert execution.status == ExecutionStatus.FAILED
+    assert cancelled == [execution.id]
