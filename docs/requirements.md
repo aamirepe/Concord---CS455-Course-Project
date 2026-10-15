@@ -20,7 +20,7 @@
 | FR9 | Debug state is broadcast to all session members in real time. | `exec_event` WS messages received by other clients. |
 | FR10 | All mutating endpoints enforce role-based permissions. | `backend/tests/test_permissions.py`, `test_project_access_permissions.py` and `test_gateway_authorization.py` pass. |
 | FR11 | Periodic CRDT checkpoints durably persist document state. | `document_versions` rows appear within 5s of activity. |
-| FR12 | The system survives a worker crash mid-execution. | `backend/tests/test_orphan_sweep.py` passes; the worker-kill experiment (`scripts/chaos.py`) is Deliverable 3. |
+| FR12 | The system survives a worker crash mid-execution. | `backend/tests/test_orphan_sweep.py` passes; the worker-kill experiment is Deliverable 3. |
 | FR13 | Members can ask a project-aware AI agent to explain, review, fix or write code; its edits are only proposals and need an editor+ to apply them. | `tests/test_agent_runner.py`, `tests/test_assistant_api.py`, `AssistantPanel.test.tsx` pass; `scripts/agent_smoke.py` passes against the real Mistral API. |
 
 ## Non-functional requirements
@@ -31,6 +31,6 @@
 | NFR2 | Concurrent users per session | ≥10 without degradation | load test (Deliverable 3) |
 | NFR3 | Execution queue wait time | <1s p95 under normal load | metrics page |
 | NFR4 | Sandbox escape | None for the documented test set | `worker/tests/test_sandbox_security.py` |
-| NFR5 | TLS for all external traffic | Required for grading demo | Caddy auto-issues cert |
+| NFR5 | TLS for all external traffic | Required for grading demo | Verified at deployment (Deliverable 3) |
 | NFR6 | Cold restart recovers session state | All files reconstructed within 5s | manual + checkpoint_loop |
 | NFR7 | CI pipeline runs lint, type check, security, tests | Every PR | .github/workflows/ci.yml |

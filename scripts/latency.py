@@ -6,7 +6,7 @@ updates down. Every edit inserts a unique token; each *other* client records
 when that token shows up in its copy of the document. Latency is therefore
 "user A types, user B sees it", measured on one clock.
 
-Used by ``scripts/load_test.py --wire`` and the pilot's "Edit latency" check.
+Used by the pilot's "Edit latency" check.
 """
 from __future__ import annotations
 
