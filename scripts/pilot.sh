@@ -54,6 +54,20 @@ dc() {
 # --- setup -------------------------------------------------------------------
 rand_hex() { head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n'; }
 
+# In-place edit that works with both GNU sed (Linux/WSL) and BSD sed (macOS).
+sed_inplace() {  # [sed options] expression file
+  local file="${!#}"
+  sed -i.bak "${@:1:$#-1}" "$file" && rm -f "$file.bak"
+}
+
+port_busy() {
+  if command -v ss >/dev/null; then
+    ss -ltnH "sport = :$1" 2>/dev/null | grep -q .
+  else
+    lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1
+  fi
+}
+
 ensure_env() {
   if [[ ! -f .env ]]; then
     cp .env.example .env
@@ -63,11 +77,11 @@ ensure_env() {
   # Replace the example placeholders once; never touch values someone set.
   # (Changing LLM_ENCRYPTION_KEY later would make saved project AI keys unreadable.)
   if grep -q '^SECRET_KEY=change-me-in-prod-32-bytes-minimum$' .env; then
-    sed -i "s/^SECRET_KEY=.*/SECRET_KEY=$(rand_hex)/" .env
+    sed_inplace "s/^SECRET_KEY=.*/SECRET_KEY=$(rand_hex)/" .env
     info "generated SECRET_KEY"
   fi
   if grep -q '^LLM_ENCRYPTION_KEY=change-me$' .env; then
-    sed -i "s/^LLM_ENCRYPTION_KEY=.*/LLM_ENCRYPTION_KEY=$(rand_hex)/" .env
+    sed_inplace "s/^LLM_ENCRYPTION_KEY=.*/LLM_ENCRYPTION_KEY=$(rand_hex)/" .env
     info "generated LLM_ENCRYPTION_KEY"
   fi
   if grep -q '^MISTRAL_API_KEY=$' .env; then
@@ -80,7 +94,7 @@ ensure_env() {
 check_ports() {
   local busy=()
   for port in 5432 6379 8000 5173; do
-    if ss -ltnH "sport = :$port" 2>/dev/null | grep -q .; then busy+=("$port"); fi
+    if port_busy "$port"; then busy+=("$port"); fi
   done
   if ((${#busy[@]})); then
     # Fine if they're ours from an earlier run.
@@ -172,7 +186,7 @@ cmd_collect() {
   } > "$dir/versions.txt" 2>&1
   # Logs never contain the .env file, but double-check no API key slipped in.
   if grep -rlE 'mstrl_|sk-[A-Za-z0-9]{20,}' "$dir" >/dev/null 2>&1; then
-    sed -i -E 's/(mstrl_|sk-)[A-Za-z0-9_-]+/\1[REDACTED]/g' "$dir"/*
+    for f in "$dir"/*; do sed_inplace -E 's/(mstrl_|sk-)[A-Za-z0-9_-]+/\1[REDACTED]/g' "$f"; done
   fi
   info "logs saved to ${dir#"$ROOT"/} (share this folder with the feedback file)"
 }
