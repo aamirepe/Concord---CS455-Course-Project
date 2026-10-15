@@ -161,6 +161,13 @@ async def collab_socket(ws: WebSocket, project_id: int, file_id: int, token: str
             await ws.send_json({"op": "error", "message": "file not found"})
             await ws.close(code=status.WS_1008_POLICY_VIOLATION)
             return
+        # Membership above was checked against the project in the URL, so the
+        # file has to belong to that same project, or a member of project A could
+        # open (and edit) a document of project B by guessing its file id.
+        if file.project_id != project_id:
+            await ws.send_json({"op": "error", "message": "file not found"})
+            await ws.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
         user = await db.get(User, user_id)
         # The name on this person's cursor comes from the account, not the client.
         username = user.username if user else f"user-{user_id}"
