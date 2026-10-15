@@ -1,9 +1,12 @@
 import asyncio
 import sys
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
 from app.core.config import get_settings
 from app.models import File
 from app.runtime.registry import RUNTIMES, Language
+
 
 async def migrate_extensions():
     settings = get_settings()

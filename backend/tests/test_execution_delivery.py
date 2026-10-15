@@ -2,12 +2,13 @@
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from redis.exceptions import ConnectionError as RedisConnectionError
+from sqlalchemy import select
+
 from app.api import executions
 from app.db.session import AsyncSessionLocal
 from app.debug import control
 from app.models import DebugSession, DebugStatus, Execution, ExecutionStatus
-from redis.exceptions import ConnectionError as RedisConnectionError
-from sqlalchemy import select
 
 
 @pytest.mark.asyncio
