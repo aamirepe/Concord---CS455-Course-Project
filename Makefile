@@ -1,4 +1,4 @@
-.PHONY: help dev up down logs test lint typecheck build sandbox chaos load docs pilot pilot-check pilot-stop pilot-reset
+.PHONY: help dev up down logs test lint typecheck build sandbox docs pilot pilot-check pilot-stop pilot-reset
 
 help:
 	@echo "Targets:"
@@ -8,8 +8,6 @@ help:
 	@echo "  test       Run backend unit + integration tests"
 	@echo "  lint       Run ruff, mypy, bandit"
 	@echo "  sandbox    Build the sandbox image"
-	@echo "  chaos      Run the worker-kill chaos test (requires CONCORD_TOKEN env)"
-	@echo "  load       Run the CRDT load test"
 	@echo "  build      Build frontend production assets"
 	@echo "  pilot      Local pilot: build, start, seed demo data, run checks (docs/PILOT_TEST.md)"
 	@echo "  pilot-check  Re-run the pilot's automated checks"
@@ -36,12 +34,6 @@ lint:
 
 sandbox:
 	docker build -t concord-sandbox:latest ./sandbox
-
-chaos:
-	docker compose exec backend python scripts/chaos.py --token $(CONCORD_TOKEN) --session-id $(SESSION_ID) --file-id $(FILE_ID)
-
-load:
-	docker compose exec backend python scripts/load_test.py --clients 1 5 10 25
 
 build:
 	docker compose exec frontend npm run build

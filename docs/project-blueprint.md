@@ -1,4 +1,4 @@
-# 📘 Implementation Blueprint: Concord Project Workspace Evolution
+# Implementation Blueprint: Concord Project Workspace Evolution
 
 ## 1. Project Overview
 **Concord** is a collaborative code execution platform. Currently, it allows users to join a "session" and edit a single file using CRDTs (Yjs/pycrdt).
@@ -11,7 +11,7 @@
 
 ---
 
-## 2. Core Requirements (The "Zero-Context" Spec)
+## 2. Core Requirements
 
 ### R1: Project Lifecycle & RBAC
 Users must be able to create and manage "Projects" (formerly Sessions).

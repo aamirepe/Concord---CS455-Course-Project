@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, getToken, Project, setToken } from "../lib/api";
+import { api, getToken, getUser, parseMemberRef, Project, setToken } from "../lib/api";
 import { ApiError, friendlyError, toast } from "../lib/errors";
 
 export default function DashboardPage() {
   const navigate = useNavigate();
+  const me = getUser();
   const [projects, setProjects] = useState<Project[]>([]);
   const [name, setName] = useState("");
   const [joinId, setJoinId] = useState("");
@@ -92,7 +93,7 @@ export default function DashboardPage() {
     if (!memberId.trim()) return;
     setLoading(true);
     try {
-      const data = await api.addProjectMember(projectId, Number(memberId), memberRole);
+      const data = await api.addProjectMember(projectId, parseMemberRef(memberId), memberRole);
       toast(data.message, "success");
       setMemberId("");
     } catch (e) {
@@ -106,7 +107,12 @@ export default function DashboardPage() {
     <div className="layout">
       <header className="topbar">
         <strong style={{ fontSize: "1.2rem" }}>Concord</strong>
-        <a href="/metrics" style={{ marginLeft: "auto" }}>Metrics</a>
+        {me && (
+          <span className="whoami" style={{ marginLeft: "auto" }} title={me.email}>
+            Signed in as <strong>{me.username}</strong> (user #{me.id})
+          </span>
+        )}
+        <a href="/metrics" style={me ? undefined : { marginLeft: "auto" }}>Metrics</a>
         <button className="secondary" onClick={() => { setToken(null); navigate("/login"); }}>Log out</button>
       </header>
 
@@ -121,11 +127,11 @@ export default function DashboardPage() {
 
           <div className="action-grid">
             <div className="action-card">
-              <h3>🚀 Create New Project</h3>
+              <h3>Create New Project</h3>
               <p style={{ opacity: 0.7, fontSize: "14px" }}>Start a new collaborative workspace with your team.</p>
               <div style={{ display: "grid", gap: 8 }}>
                 <input
-                  placeholder="Project name..."
+                  placeholder="Project name"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   style={{ padding: "8px", background: "var(--bg)", border: "1px solid var(--border)", color: "var(--fg)", borderRadius: "4px" }}
@@ -137,8 +143,8 @@ export default function DashboardPage() {
             </div>
 
             <div className="action-card">
-              <h3>🤝 Join Existing Project</h3>
-              <p style={{ opacity: 0.7, fontSize: "14px" }}>Enter a project ID to jump in.</p>
+              <h3>Join Existing Project</h3>
+              <p style={{ opacity: 0.7, fontSize: "14px" }}>Enter a project ID to open it or request access.</p>
               <div style={{ display: "grid", gap: 8 }}>
                 <input
                   placeholder="Project ID"
@@ -164,7 +170,7 @@ export default function DashboardPage() {
             <h3>Your Active Projects</h3>
             {projects.length === 0 ? (
               <div style={{ textAlign: "center", padding: "40px", opacity: 0.5, border: "1px dashed var(--border)", borderRadius: "8px" }}>
-                No projects found. Create one to get started!
+                No projects yet. Create a project or join an existing one.
               </div>
             ) : (
               <div className="project-grid">
@@ -180,10 +186,10 @@ export default function DashboardPage() {
                         <strong>Add Member:</strong>
                         <div style={{ display: "flex", gap: 4 }}>
                           <input
-                            placeholder="User ID"
+                            placeholder="User ID or username"
                             value={memberId}
                             onChange={e => setMemberId(e.target.value)}
-                            style={{ width: "60px", padding: "4px", background: "var(--bg)", color: "var(--fg)", border: "1px solid var(--border)", borderRadius: "2px" }}
+                            style={{ width: "140px", padding: "4px", background: "var(--bg)", color: "var(--fg)", border: "1px solid var(--border)", borderRadius: "2px" }}
                           />
                           <select
                             value={memberRole}

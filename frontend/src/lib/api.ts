@@ -118,6 +118,13 @@ export function getToken(): string | null {
   return localStorage.getItem(tokenKey);
 }
 
+// What a member field holds: digits are a user ID, anything else a username
+// for the server to look up.
+export function parseMemberRef(input: string): number | string {
+  const value = input.trim();
+  return /^\d+$/.test(value) ? Number(value) : value;
+}
+
 export function getUser(): User | null {
   const u = localStorage.getItem(userKey);
   return u ? JSON.parse(u) : null;
@@ -168,7 +175,8 @@ export const api = {
   listProjects: () => req<Project[]>("/projects"),
   createProject: (name: string) => req<Project>("/projects", { method: "POST", body: JSON.stringify({ name }) }),
   joinProject: (projectId: number) => req<{ status: string; role: string }>(`/projects/${projectId}/join`, { method: "POST" }),
-  addProjectMember: (projectId: number, userId: number, role: string) =>
+  // userId: a numeric user ID or a username; the server accepts either.
+  addProjectMember: (projectId: number, userId: number | string, role: string) =>
     req<{ message: string }>(`/projects/${projectId}/members`, { method: "POST", body: JSON.stringify({ user_id: userId, role }) }),
   listProjectMembers: (projectId: number) => req<ProjectMember[]>(`/projects/${projectId}/members`),
   removeProjectMember: (projectId: number, userId: number) =>

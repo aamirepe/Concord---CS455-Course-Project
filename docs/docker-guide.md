@@ -1,4 +1,4 @@
-# 📦 The Complete Guide to Docker for Developers
+# Docker Guide for Developers
 
 This guide is designed to take you from a complete beginner to understanding exactly how Docker operates, how it fits into the development lifecycle, and how to manage it in professional projects like Concord.
 
@@ -14,15 +14,15 @@ When you run a Docker container, it behaves exactly the same way on a MacBook Ai
 
 ---
 
-## 2. How Docker Actually Operates (The Technical Magic)
+## 2. How Docker Operates
 
 To understand Docker, you must understand the difference between **Virtual Machines (VMs)** and **Containers**.
 
-### Virtual Machines (The Heavy Way)
+### Virtual Machines
 A VM simulates a whole physical computer. It requires a "Hypervisor" to create a virtual hardware layer. On top of that, you must install a full "Guest OS" (like a complete copy of Windows or Ubuntu).
 - **The Cost:** VMs are slow to boot, consume gigabytes of RAM, and waste CPU cycles running two operating systems at once.
 
-### Containers (The Light Way)
+### Containers
 Docker doesn't simulate hardware. Instead, it shares the **Kernel** (the core brain) of the host operating system. It uses two key Linux Kernel features to create isolation:
 
 1. **Namespaces (Isolation):** Namespaces provide a "curtain" around the process. They make the process believe it has its own private network stack, its own process tree (PID), and its own filesystem. The process inside the container cannot see or interact with other processes on your Mac.
@@ -36,7 +36,7 @@ Docker doesn't simulate hardware. Instead, it shares the **Kernel** (the core br
 
 The journey of your code into a container happens in three distinct stages: **Dockerfile $\rightarrow$ Image $\rightarrow$ Container**.
 
-### Stage 1: The Dockerfile (The Recipe)
+### Stage 1: The Dockerfile
 A `Dockerfile` is a plain text file containing a sequence of instructions. It is the "recipe" for your environment.
 
 **Common Instructions:**
@@ -46,11 +46,11 @@ A `Dockerfile` is a plain text file containing a sequence of instructions. It is
 - `RUN`: Executes a command *during the build process* (e.g., `RUN pip install -r requirements.txt`).
 - `CMD`: Defines the command that runs *every time the container starts* (e.g., `CMD ["python", "main.py"]`).
 
-### Stage 2: The Image (The Frozen Snapshot)
+### Stage 2: The Image
 When you run `docker build`, Docker follows the recipe in the Dockerfile and creates an **Image**.
 An image is a read-only, immutable snapshot. It's like a "Save Game" file. It contains the filesystem and the configuration. You can push this image to a registry (like Docker Hub), and anyone in the world can pull it and have the exact same environment.
 
-### Stage 3: The Container (The Living Instance)
+### Stage 3: The Container
 When you run `docker run`, Docker takes that frozen Image and adds a thin "Writable Layer" on top of it. This becomes a **Container**.
 A container is a living process. You can start it, stop it, and delete it. If you delete a container, the original Image remains untouched.
 
@@ -78,19 +78,19 @@ In a real project like Concord, you don't just have one container; you have many
 
 ---
 
-## 5. Professional Development Tips & "Tricks"
+## 5. Development Practices
 
 As you grow in your career, you will encounter these common Docker scenarios.
 
-### The "Zombie" State (Deadlocks)
+### Stuck Containers (Deadlocks)
 As you saw recently, Docker can freeze. This usually happens when a process crashes but doesn't release the `docker.sock` (the communication bridge).
 - **The Fix:** Use `sudo pkill -9 Docker` to kill the processes and `sudo rm /var/run/docker.sock` to remove the lock.
 
-### The "Clean Slate" (Volume Wiping)
+### Resetting State (Removing Volumes)
 Sometimes your database gets into a weird state and you just want to delete everything and start over.
 - **The Command:** `docker compose down -v`. The `-v` flag tells Docker to delete the volumes (the database data).
 
-### The "Silent Crash" (Logs)
+### Diagnosing Crashes (Logs)
 When a container starts and immediately stops, you won't see an error in your terminal.
 - **The Command:** `docker compose logs -f [service_name]`. This lets you "tail" the logs in real-time to see exactly why the app crashed.
 

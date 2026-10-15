@@ -350,6 +350,3 @@ docker compose up -d --build
 - Read `docs/HOW_IT_WORKS.md` to understand what each piece does
 - Read `docs/api.md` to see every endpoint
 - Run the tests: `docker compose exec backend pytest`
-- Run the load test: `docker compose exec backend python scripts/load_test.py --clients 1 5 10`
-
-Have fun.

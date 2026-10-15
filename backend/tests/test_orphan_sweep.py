@@ -9,13 +9,14 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-import app.realtime.orphan_sweep as orphan_sweep_module
 import pytest
+from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
+
+import app.realtime.orphan_sweep as orphan_sweep_module
 from app.core.config import get_settings
 from app.models import DebugSession, DebugStatus, Execution, ExecutionStatus
 from app.realtime.orphan_sweep import ORPHAN_THRESHOLD, sweep_once
-from httpx import AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession
 
 
 @pytest.fixture(autouse=True)
