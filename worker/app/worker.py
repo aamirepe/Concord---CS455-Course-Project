@@ -5,10 +5,11 @@ import os
 import socket
 import tempfile
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import redis.asyncio as aioredis_async
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.core.config import get_settings
 from app.db.session import AsyncSessionLocal
@@ -52,6 +53,14 @@ async def _publish_status(project_id: int, execution_id: int, status: str) -> No
         "status": status,
     })
 
+def _workspace_path(tmpdir: str, file_path: str) -> Path:
+    """Resolve an untrusted project path before any host filesystem write."""
+    root = Path(tmpdir).resolve()
+    destination = (root / file_path).resolve()
+    if Path(file_path).is_absolute() or destination == root or not destination.is_relative_to(root):
+        raise ValueError("File path must stay inside the execution workspace")
+    return destination
+
 async def _mount_workspace(project_id: int, main_file_id: int, tmpdir: str) -> None:
     """Fetch all files in the project and recreate the folder structure in tmpdir."""
     async with AsyncSessionLocal() as db:
@@ -74,8 +83,8 @@ async def _mount_workspace(project_id: int, main_file_id: int, tmpdir: str) -> N
                 content = doc_to_text(doc_from_bytes(latest.snapshot_bytes))
 
             # 3. Create directory and write file
-            full_path = os.path.join(tmpdir, file.path)
-            os.makedirs(os.path.dirname(full_path), exist_ok=True)
+            full_path = _workspace_path(tmpdir, file.path)
+            full_path.parent.mkdir(parents=True, exist_ok=True)
             with open(full_path, "w", encoding="utf-8") as f:
                 f.write(content)
 
@@ -91,24 +100,22 @@ async def _run_one(payload: dict) -> None:
 
     log.info("worker=%s picked up execution=%d (debug=%s)", worker_id, execution_id, debug)
 
-    # The priority queue can let a job wait a while, during which it may have
-    # been cancelled; cancellation also removes it from the queue, but that
-    # race the other way (we pop it the same instant it's cancelled) is still
-    # possible, so check before spending a slot on a sandbox nobody wants.
+    # Claim only a queued run, atomically with its status change. A queue
+    # delivery can lose its acknowledgement after writing the payload; the
+    # API may already have marked that run failed when we receive it.
     async with AsyncSessionLocal() as db:
-        execution = await db.get(Execution, execution_id)
-        if execution and execution.status == ExecutionStatus.CANCELLED:
-            log.info("execution=%d was cancelled before a worker picked it up; skipping", execution_id)
-            await _publish_status(project_id, execution_id, "cancelled")
+        claimed = (await db.execute(
+            update(Execution)
+            .where(Execution.id == execution_id, Execution.project_id == project_id,
+                   Execution.file_id == file_id, Execution.status == ExecutionStatus.QUEUED)
+            .values(status=ExecutionStatus.STARTING, worker_id=worker_id,
+                    started_at=datetime.now(timezone.utc))
+            .returning(Execution.id)
+        )).scalar_one_or_none()
+        await db.commit()
+        if claimed is None:
+            log.info("execution=%d is no longer queued; skipping", execution_id)
             return
-
-    now = datetime.now(timezone.utc)
-    await _transition(
-        execution_id,
-        ExecutionStatus.STARTING,
-        worker_id=worker_id,
-        started_at=now,
-    )
     await _publish_status(project_id, execution_id, "starting")
 
     try:
@@ -150,12 +157,11 @@ async def _run_one(payload: dict) -> None:
 
             async with AsyncSessionLocal() as db:
                 file_obj = await db.get(File, file_id)
-                if not file_obj:
+                if not file_obj or file_obj.project_id != project_id:
                     raise Exception("Main file not found in DB")
                 main_path_rel = file_obj.path
 
-            file_name = os.path.basename(main_path_rel)
-            main_path = os.path.join(tmpdir, main_path_rel)
+            main_path = _workspace_path(tmpdir, main_path_rel)
 
             if source_text:
                 with open(main_path, "w", encoding="utf-8") as f:
