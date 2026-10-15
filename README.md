@@ -5,7 +5,7 @@ same time, run the code in isolated Docker sandboxes, watch the output live, and
 project-aware AI assistant to explain or fix it. Every change syncs through CRDTs, so
 nobody's edits get lost or duplicated.
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
 - **Docker & Docker Compose v2**. This is all you need to run it.
@@ -64,9 +64,9 @@ The backend applies database migrations (`alembic upgrade head`) on start.
 
 ---
 
-## 🌟 Core Capabilities
+## Core Capabilities
 
-### 🤝 Real-Time Collaboration (CRDTs)
+### Real-Time Collaboration (CRDTs)
 Edits are **Yjs** updates in the browser and **pycrdt** on the server, sent over WebSockets.
 - **Conflict-free editing:** simultaneous edits converge. There's no locking and no "file changed on disk".
 - **Presence:** see who is in the project and in which file.
@@ -79,7 +79,7 @@ Edits are **Yjs** updates in the browser and **pycrdt** on the server, sent over
 - **Tabs, Ctrl+P and search:** open files as tabs (with who else is in each), jump to a file by name, and search every file, unsaved edits included.
 - **Recent changes:** the sidebar lists the five most recently changed files with who changed them and by how many lines (`alice +12 −3`). Files that others changed since you last opened them get a ● in the file tree.
 
-### 🛡️ Sandboxed Execution
+### Sandboxed Execution
 Code never runs on the server itself. **Run** queues a job in Redis; a worker pool
 picks it up and starts a fresh container per run.
 - **Languages:** Python, C/C++ (compiled with g++) and JavaScript (Node 20).
@@ -87,7 +87,7 @@ picks it up and starts a fresh container per run.
 - **Live console:** one block per run (who ran it, status, output, exit code) for everyone in the project, with **Ask AI to fix** on failed runs.
 - **Program input:** type what the program reads from stdin before pressing Run.
 
-### 🔑 Roles and Access Control
+### Roles and Access Control
 | Role | Can |
 |---|---|
 | viewer | read code, watch edits and runs, use the AI assistant (read-only) |
@@ -101,7 +101,7 @@ collaboration gateway rejects edits from viewers.
 To join a project, a user enters its ID and requests access; the owner approves (choosing
 a role) or rejects.
 
-### 🧠 AI Coding Assistant (Mistral)
+### AI Coding Assistant (Mistral)
 - **An agent, not a single chat call:** it uses Mistral function calling to list files, read their live contents, look at the last run's output and syntax-check code before answering.
 - **Modes:** Ask, Explain, Fix last error, Generate, Review.
 - **Human in the loop:** a code change comes back as a proposal, shown side by side. An editor clicks **Accept** and it syncs through the CRDT like any other edit. Nothing is written server-side.
@@ -111,7 +111,7 @@ a role) or rejects.
   - Keep `MISTRAL_MODEL=codestral-latest`: free trial keys can have no quota for `mistral-small`.
   - Check your key with `PYTHONPATH=backend python scripts/agent_smoke.py`.
 
-### 🐞 Collaborative Debugger (Python)
+### Collaborative Debugger (Python)
 - Click left of a line number to set a breakpoint, then press **Debug**.
 - The program runs under debugpy inside the same sandbox (still no network). The worker talks to debugpy over the container's stdin/stdout.
 - Everyone in the project sees the paused line, the call stack and the variables live, and who stepped last. Members with the debugger role step: continue (F5), over (F10), into (F11), out (Shift+F11).
@@ -119,7 +119,7 @@ a role) or rejects.
 
 ---
 
-## 🛠 Architecture Overview
+## Architecture Overview
 
 ```
 Browser (React + Monaco + Yjs) ──REST──▶ FastAPI backend ──▶ PostgreSQL
@@ -142,7 +142,7 @@ More detail: [docs/architecture.md](docs/architecture.md) and [docs/HOW_IT_WORKS
 
 ---
 
-## 🧪 Testing
+## Testing
 
 ```bash
 # Backend: unit + API + WebSocket tests (in-memory SQLite, no services needed)
@@ -168,7 +168,7 @@ CI never calls Mistral; agent tests use a scripted fake provider.
 
 ---
 
-## 🤖 Developing with AI Agents
+## Developing with AI Agents
 
 Concord is designed to be extended using AI agents (like Claude Code):
 - **Feature implementation:** "implement a new API endpoint", "add a UI component".
@@ -177,7 +177,7 @@ Concord is designed to be extended using AI agents (like Claude Code):
 
 ---
 
-## 📚 Documentation
+## Documentation
 
 | Doc | What's in it |
 |---|---|
