@@ -38,7 +38,7 @@ class ExecutionStatus(enum.StrEnum):
 
 # State machine — explicit transition table.
 ALLOWED_TRANSITIONS: dict[ExecutionStatus, set[ExecutionStatus]] = {
-    ExecutionStatus.QUEUED: {ExecutionStatus.STARTING, ExecutionStatus.COMPILING, ExecutionStatus.CANCELLED},
+    ExecutionStatus.QUEUED: {ExecutionStatus.STARTING, ExecutionStatus.COMPILING, ExecutionStatus.CANCELLED, ExecutionStatus.FAILED},
     ExecutionStatus.STARTING: {ExecutionStatus.RUNNING, ExecutionStatus.COMPILING, ExecutionStatus.FAILED, ExecutionStatus.TIMEOUT},
     ExecutionStatus.COMPILING: {
         ExecutionStatus.RUNNING,
