@@ -280,6 +280,45 @@ describe("SessionPage", () => {
     expect(seen).toHaveLength(1);
   });
 
+  it("shows a new folder once when the socket event arrives before the create response", async () => {
+    const harness = mockConnectProject();
+    const folder = { id: 20, project_id: 1, parent_folder_id: null, name: "src", created_at: "now" };
+    let respond: (f: typeof folder) => void = () => {};
+    vi.spyOn(api, "createFolder").mockReturnValue(new Promise(resolve => { respond = resolve; }));
+    render(<SessionPage />, { wrapper: MemoryRouter });
+    await screen.findByRole("tab", { name: /main\.py/ });
+    await waitFor(() => expect(connectProjectMock).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByText("+ New folder"));
+    fireEvent.change(screen.getByPlaceholderText("folder_name"), { target: { value: "src" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    act(() => harness.emit({ op: "WORKSPACE_FOLDER_CREATED", folder }));
+    await act(async () => respond(folder));
+
+    await waitFor(() => expect(screen.queryByPlaceholderText("folder_name")).not.toBeInTheDocument());
+    expect(document.querySelectorAll(".folder-name")).toHaveLength(1);
+  });
+
+  it("shows a new file once when the socket event arrives before the create response", async () => {
+    const harness = mockConnectProject();
+    const created = { ...file1, id: 11, path: "notes.py" };
+    let respond: (f: typeof created) => void = () => {};
+    vi.spyOn(api, "createFile").mockReturnValue(new Promise(resolve => { respond = resolve; }));
+    render(<SessionPage />, { wrapper: MemoryRouter });
+    await screen.findByRole("tab", { name: /main\.py/ });
+    await waitFor(() => expect(connectProjectMock).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByText("+ New file"));
+    fireEvent.change(screen.getByPlaceholderText("file_name.py"), { target: { value: "notes.py" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    act(() => harness.emit({ op: "WORKSPACE_FILE_CREATED", file: created }));
+    await act(async () => respond(created));
+
+    await waitFor(() => expect(screen.queryByPlaceholderText("file_name.py")).not.toBeInTheDocument());
+    const nodes = [...document.querySelectorAll(".file-node")].filter(n => n.textContent?.includes("notes.py"));
+    expect(nodes).toHaveLength(1);
+  });
+
   it("creates a new file in the project root when no folder is selected", async () => {
     mockConnectProject();
     const created = { ...file1, id: 11, path: "notes.py" };

@@ -20,6 +20,16 @@ import QuickOpen from "../components/QuickOpen";
 import SearchPanel, { SearchPanelHandle } from "../components/SearchPanel";
 import type { Reveal } from "../components/Editor";
 
+// Insert or replace by id. A new file or folder reaches its creator twice, from the
+// REST response and from the project socket, in either order.
+function upsertById<T extends { id: number }>(list: T[], item: T): T[] {
+  const idx = list.findIndex(x => x.id === item.id);
+  if (idx === -1) return [...list, item];
+  const next = [...list];
+  next[idx] = item;
+  return next;
+}
+
 export default function SessionPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
@@ -130,7 +140,7 @@ export default function SessionPage() {
   const onStructuralUpdate = useCallback((msg: any) => {
     const { op, file, folder, folder_id, user_id, file_id } = msg;
     if (op === "WORKSPACE_FILE_CREATED") {
-      setFiles(prev => [...prev, file]);
+      setFiles(prev => upsertById(prev, file));
       setActive(prev => prev || file);
     } else if (op === "WORKSPACE_FILE_UPDATED") {
       setFiles(prev => {
@@ -559,11 +569,11 @@ export default function SessionPage() {
       // No folder selected means the project root.
       if (modal.type === "file") {
         const f = await api.createFile(project.id, modal.name, activeFolder?.id ?? null);
-        setFiles(prev => [...prev, f]);
+        setFiles(prev => upsertById(prev, f));
         openFile(f);
       } else {
         const f = await api.createFolder(project.id, modal.name, activeFolder?.id ?? null);
-        setFolders(prev => [...prev, f]);
+        setFolders(prev => upsertById(prev, f));
       }
       setModal(null);
     } catch (e) {
