@@ -87,6 +87,22 @@ describe("SessionPage", () => {
     vi.restoreAllMocks();
   });
 
+  it("shows the project ID, the current user and their role, and copies the ID", async () => {
+    mockConnectProject();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    render(<><SessionPage /><Toasts /></>, { wrapper: MemoryRouter });
+
+    expect(await screen.findByText(/Project: demo-project · ID #1/)).toBeInTheDocument();
+    const whoami = screen.getByText(/^You:/);
+    expect(whoami).toHaveTextContent("You: alice · owner (user #1)");
+    expect(whoami).toHaveAttribute("title", "a@example.com");
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy ID" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("1"));
+    expect(await screen.findByText("Project ID 1 copied.")).toBeInTheDocument();
+  });
+
   it("renders the project name and file tree without throwing", async () => {
     mockConnectProject();
     render(<SessionPage />, { wrapper: MemoryRouter });

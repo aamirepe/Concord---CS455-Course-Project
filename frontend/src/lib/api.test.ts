@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { api, getToken, getUser, setToken } from "./api";
+import { api, getToken, getUser, parseMemberRef, setToken } from "./api";
 import { ApiError, UNAUTHORIZED_EVENT } from "./errors";
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -25,6 +25,14 @@ describe("api.ts", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  describe("parseMemberRef", () => {
+    it("treats digits as a user ID and anything else as a username", () => {
+      expect(parseMemberRef(" 42 ")).toBe(42);
+      expect(parseMemberRef(" test_admin ")).toBe("test_admin");
+      expect(parseMemberRef("12ab")).toBe("12ab");
+    });
   });
 
   describe("token/user storage", () => {

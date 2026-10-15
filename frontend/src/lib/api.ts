@@ -118,6 +118,13 @@ export function getToken(): string | null {
   return localStorage.getItem(tokenKey);
 }
 
+// What a member field holds: digits are a user ID, anything else a username
+// for the server to look up.
+export function parseMemberRef(input: string): number | string {
+  const value = input.trim();
+  return /^\d+$/.test(value) ? Number(value) : value;
+}
+
 export function getUser(): User | null {
   const u = localStorage.getItem(userKey);
   return u ? JSON.parse(u) : null;

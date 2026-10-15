@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { api, AIEvent, AIProposal, Project, Execution, FileActivity, FileChangedEvent, FileMeta, FolderMeta, getToken, getUser, JoinRequest, ProjectMember } from "../lib/api";
+import { api, AIEvent, AIProposal, Project, Execution, FileActivity, FileChangedEvent, FileMeta, FolderMeta, getToken, getUser, JoinRequest, parseMemberRef, ProjectMember } from "../lib/api";
 import { connectProject } from "../lib/ws";
 import CollabEditor from "../components/Editor";
 import FileTree from "../components/FileTree";
@@ -477,7 +477,8 @@ export default function SessionPage() {
   }
 
   const isOwner = !!project && project.owner_id === getUser()?.id;
-  const myRole = isOwner ? "owner" : members.find((m) => m.user.id === getUser()?.id)?.role;
+  const currentUser = getUser();
+  const myRole = isOwner ? "owner" : members.find((m) => m.user.id === currentUser?.id)?.role;
   // Viewers can ask the assistant but not apply its edits.
   const canEdit = myRole === "owner" || myRole === "editor" || myRole === "debugger";
   const canDebug = myRole === "owner" || myRole === "debugger";
@@ -617,14 +618,11 @@ export default function SessionPage() {
   async function handleAddMember() {
     if (!project) return;
 
-    const entered = memberForm.userId.trim();
-    if (entered === "") {
+    if (memberForm.userId.trim() === "") {
       toast("Please enter a User ID or Username.", "error");
       return;
     }
-
-    // Digits are a user ID; anything else is looked up as a username.
-    const userId = /^\d+$/.test(entered) ? Number(entered) : entered;
+    const userId = parseMemberRef(memberForm.userId);
 
     try {
       await api.addProjectMember(project.id, userId, memberForm.role);
@@ -669,7 +667,27 @@ export default function SessionPage() {
       <div style={{ display: "flex", flexDirection: "column", height: "100vh", width: "100vw", overflow: "hidden", background: "var(--bg)", color: "var(--fg)", boxSizing: "border-box" }}>
         <header className="topbar" style={{ flexShrink: 0, height: 40, display: "flex", alignItems: "center", padding: "0 12px", background: "var(--panel)", borderBottom: "1px solid var(--border)" }}>
           <strong style={{ marginRight: 12 }}>Concord</strong>
-          <span style={{ opacity: 0.7, marginRight: "auto" }}>Project: {project.name}</span>
+          <span style={{ opacity: 0.7 }}>Project: {project.name} · ID #{project.id}</span>
+          <button
+            className="secondary small"
+            style={{ marginLeft: 8, marginRight: "auto" }}
+            title="Copy the project ID to share with someone who wants to request access"
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(String(project.id));
+                toast(`Project ID ${project.id} copied.`, "success");
+              } catch {
+                toast(`Project ID: ${project.id}`, "info");
+              }
+            }}
+          >
+            Copy ID
+          </button>
+          {currentUser && (
+            <span className="whoami" title={currentUser.email}>
+              You: <strong>{currentUser.username}</strong>{myRole ? ` · ${myRole}` : ""} (user #{currentUser.id})
+            </span>
+          )}
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             {members.map((m) => (
               <span key={m.user.id} className={`role-pill ${m.role}`} style={{ fontSize: 10 }} title={`${m.user.username} (${m.role}, user #${m.user.id})`}>

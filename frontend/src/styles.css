@@ -42,6 +42,12 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   gap: 12px;
   flex-shrink: 0;
 }
+.whoami {
+  font-size: 12px;
+  opacity: 0.8;
+  margin-right: 12px;
+  white-space: nowrap;
+}
 .sidebar-main-container {
   display: flex;
   flex-grow: 1;

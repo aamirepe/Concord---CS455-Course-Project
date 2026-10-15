@@ -131,9 +131,34 @@ describe("DashboardPage", () => {
     render(<DashboardPage />, { wrapper: MemoryRouter });
     await screen.findByText("demo-project");
 
-    fireEvent.change(screen.getByPlaceholderText("User ID"), { target: { value: "7" } });
+    fireEvent.change(screen.getByPlaceholderText("User ID or username"), { target: { value: "7" } });
     fireEvent.click(screen.getByRole("button", { name: /^add$/i }));
 
     await waitFor(() => expect(api.addProjectMember).toHaveBeenCalledWith(1, 7, "VIEWER"));
+  });
+
+  it("addMember sends a username as text", async () => {
+    setToken(someToken);
+    vi.spyOn(api, "listProjects").mockResolvedValue([{ id: 1, owner_id: 1, name: "demo-project", created_at: "now" }]);
+    vi.spyOn(api, "addProjectMember").mockResolvedValue({ message: "added" });
+
+    render(<DashboardPage />, { wrapper: MemoryRouter });
+    await screen.findByText("demo-project");
+
+    fireEvent.change(screen.getByPlaceholderText("User ID or username"), { target: { value: "bob" } });
+    fireEvent.click(screen.getByRole("button", { name: /^add$/i }));
+
+    await waitFor(() => expect(api.addProjectMember).toHaveBeenCalledWith(1, "bob", "VIEWER"));
+  });
+
+  it("shows who is signed in", async () => {
+    setToken(someToken);
+    vi.spyOn(api, "listProjects").mockResolvedValue([]);
+
+    render(<DashboardPage />, { wrapper: MemoryRouter });
+
+    const whoami = await screen.findByText(/signed in as/i);
+    expect(whoami).toHaveTextContent("Signed in as alice (user #1)");
+    expect(whoami).toHaveAttribute("title", "a@example.com");
   });
 });
