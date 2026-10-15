@@ -108,7 +108,8 @@ async def update_folder(
         if not member or not at_least(member.role, Role.EDITOR):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Editor role required to modify folders")
 
-    if payload.parent_id is not None:
+    parent_was_set = "parent_id" in payload.model_fields_set
+    if parent_was_set and payload.parent_id is not None:
         await _check_parent(db, project_id, payload.parent_id, moving_id=folder.id)
 
     # Update name
@@ -116,13 +117,13 @@ async def update_folder(
         folder.name = payload.name
 
     # Update parent
-    if payload.parent_id is not None:
+    if parent_was_set:
         folder.parent_folder_id = payload.parent_id
 
     # Update paths of all descendant files
     # This is a simplified version; a robust implementation would recursively update all child folder paths
 
-    if payload.parent_id is not None or payload.name is not None:
+    if parent_was_set or payload.name is not None:
         # In a real system, we would calculate the new path prefix and update all child files
         # For now, we'll mark it as needing update or implement a simpler path logic
         pass

@@ -136,7 +136,14 @@ async def update_file(
         from app.runtime.registry import language_for_path
         file.language = language_for_path(payload.path)  # follows the new extension
 
-    if payload.folder_id is not None:
+    if "folder_id" in payload.model_fields_set:
+        if payload.folder_id is not None:
+            folder = await db.get(Folder, payload.folder_id)
+            if not folder or folder.project_id != project_id:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Folder not found in project",
+                )
         file.folder_id = payload.folder_id
 
     await db.commit()
