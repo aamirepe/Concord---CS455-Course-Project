@@ -42,3 +42,27 @@ async def test_duplicate_signup_rejected(client):
         json={"username": "dave", "email": "dave2@example.com", "password": "supersecret1"},
     )
     assert r.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_signup_rejects_username_and_email_owned_by_different_users(client):
+    for username, email in (
+        ("alice-existing", "alice-existing@example.com"),
+        ("bob-existing", "bob-existing@example.com"),
+    ):
+        response = await client.post(
+            "/auth/signup",
+            json={"username": username, "email": email, "password": "supersecret1"},
+        )
+        assert response.status_code == 201, response.text
+
+    response = await client.post(
+        "/auth/signup",
+        json={
+            "username": "alice-existing",
+            "email": "bob-existing@example.com",
+            "password": "supersecret1",
+        },
+    )
+
+    assert response.status_code == 409

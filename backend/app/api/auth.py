@@ -15,7 +15,9 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 @router.post("/signup", response_model=TokenOut, status_code=status.HTTP_201_CREATED)
 async def signup(payload: UserCreate, db: DbSession) -> TokenOut:
     existing = await db.execute(
-        select(User).where((User.username == payload.username) | (User.email == payload.email))
+        select(User.id)
+        .where((User.username == payload.username) | (User.email == payload.email))
+        .limit(1)
     )
     if existing.scalar_one_or_none():
         raise HTTPException(
