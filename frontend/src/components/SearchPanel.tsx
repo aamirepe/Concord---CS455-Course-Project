@@ -29,6 +29,7 @@ const SearchPanel = forwardRef<SearchPanelHandle, Props>(function SearchPanel({ 
     if (!query.trim()) {
       setResult(null);
       setError(null);
+      setLoading(false);
       return;
     }
     let stale = false;

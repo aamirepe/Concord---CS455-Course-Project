@@ -52,6 +52,20 @@ describe("SearchPanel", () => {
     await waitFor(() => expect(screen.queryByText(/can't reach the server/i)).toBeNull());
   });
 
+  it("stops saying Searching when the box is cleared while a request is in flight", async () => {
+    let finish: (r: typeof result) => void = () => {};
+    vi.spyOn(api, "search").mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+    render(<SearchPanel projectId={1} onOpen={vi.fn()} />);
+    const box = screen.getByLabelText("Search all files");
+    fireEvent.change(box, { target: { value: "total" } });
+    expect(await screen.findByText("Searching…")).toBeInTheDocument();
+    fireEvent.change(box, { target: { value: "" } });
+    await waitFor(() => expect(screen.queryByText("Searching…")).toBeNull());
+    await act(async () => { finish(result); });
+    expect(screen.queryByText("Searching…")).toBeNull();
+    expect(screen.queryByText("2 results in 1 file")).toBeNull();
+  });
+
   it("says when there are no or too many results", async () => {
     vi.spyOn(api, "search")
       .mockResolvedValueOnce({ query: "q", total: 0, truncated: false, files: [] })
