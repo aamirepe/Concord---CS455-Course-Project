@@ -1,10 +1,10 @@
-# 🚀 Concord Workspace Masterplan: "Google Docs for Code"
+# Concord Workspace Masterplan: "Google Docs for Code"
 
 This document is the **single source of truth** for the evolution of Concord. It describes the vision, the technical architecture, and tracks the progress of the transition from a "single-file snippet runner" to a "Collaborative Cloud Workspace."
 
 ---
 
-## 🌟 The Vision
+## The Vision
 Concord should be a living, shared environment where a "Project" is more than just a collection of files—it's a collaborative space.
 - **Independence**: 4 people can join a project; User A can work on `api.py` while User B works on `styles.css` without seeing each other's cursors.
 - **Collaboration**: Two other people can work on `main.py` together—one writing the core logic, the other verifying and editing in real-time.
@@ -13,7 +13,7 @@ Concord should be a living, shared environment where a "Project" is more than ju
 
 ---
 
-## 🛠 Architectural Pillars
+## Architectural Pillars
 
 ### 1. Hierarchical Workspaces
 **From Flat Files $\rightarrow$ Project Folders.**
@@ -48,31 +48,31 @@ Concord should be a living, shared environment where a "Project" is more than ju
 
 ---
 
-## 🗺️ Implementation Roadmap & Progress Tracker
+## Implementation Roadmap & Progress Tracker
 
 This section serves as the guide for any agent to know what is remaining.
 
-### Phase 1: Project Foundation 🏗️
+### Phase 1: Project Foundation
 *Goal: Establish the ability to create and own projects.*
 - [ ] **Rename/Refactor**: Rename `Session` $\rightarrow$ `Project` across DB and Code.
 - [ ] **Project API**: Implement `POST /projects` (Creation + Ownership assignment).
 - [ ] **RBAC Middleware**: Implement checks for `OWNER`/`EDITOR` roles on file modifications.
 - [ ] **Bootstrapping**: Logic to create default starter files upon project creation.
 
-### Phase 2: Hierarchical Workspace 📂
+### Phase 2: Hierarchical Workspace
 *Goal: Move from a flat list to a real file system.*
 - [ ] **DB Migration**: Add `path` to `File` and create the `Folder` table.
 - [ ] **Structural APIs**: Implement `create_folder`, `move_file`, `rename_file`.
 - [ ] **Real-time Sidebar**: Build the WebSocket broadcast system for structural updates.
 - [ ] **UI File Tree**: Implement the recursive File Explorer component.
 
-### Phase 3: Workspace-Aware Execution ⚡
+### Phase 3: Workspace-Aware Execution
 *Goal: Support multi-file codebases and imports.*
 - [ ] **Payload Upgrade**: Update API to send all project files to the worker.
 - [ ] **Worker Mounting**: Update `SandboxRunner` to recreate the directory structure.
 - [ ] **Execution Verification**: Test multi-file imports (e.g., Python `import utils` from `utils.py`).
 
-### Phase 4: Presence & Polishing ✨
+### Phase 4: Presence & Polishing
 *Goal: Make it feel like a living team environment.*
 - [ ] **Global Presence**: Implement "User X is editing File Y" indicators in the sidebar.
 - [ ] **Invitation System**: Signed invitation links for new members.
@@ -81,13 +81,13 @@ This section serves as the guide for any agent to know what is remaining.
 
 ---
 
-## ✅ Completed Milestones
+## Completed Milestones
 - [x] **C++ Execution Stage Separation**: Implemented Build $\rightarrow$ Run logic in `worker/app/worker.py`.
 - [x] **Core CRDT Integration**: Per-file real-time editing is functional.
 - [x] **Design Blueprinting**: Masterplan and detailed specs finalized.
 
 ---
 
-## 🚩 Current Status
+## Current Status
 **Current Focus**: Entering **Phase 1 (Project Foundation)**.
 **Immediate Next Task**: Implement the `POST /projects` API and the database migration to support Project Ownership.

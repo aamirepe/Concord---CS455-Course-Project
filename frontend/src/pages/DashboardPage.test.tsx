@@ -48,7 +48,7 @@ describe("DashboardPage", () => {
     render(<DashboardPage />, { wrapper: MemoryRouter });
     await waitFor(() => expect(api.listProjects).toHaveBeenCalled());
 
-    const input = screen.getByPlaceholderText("Project name...") as HTMLInputElement;
+    const input = screen.getByPlaceholderText("Project name") as HTMLInputElement;
     fireEvent.change(input, { target: { value: "new-project" } });
     fireEvent.click(screen.getByRole("button", { name: /create project/i }));
 

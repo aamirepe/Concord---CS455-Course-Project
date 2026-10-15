@@ -36,7 +36,7 @@ export default function FileTree({ files, folders, activeFileId, activeFolderId,
           title="New files and folders go here"
           style={{ cursor: "pointer", opacity: 0.8 }}
         >
-          📁 project root
+          project root
         </div>
       )}
       <TreeItem
@@ -152,7 +152,7 @@ function TreeItem({
             }}
           >
             <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-              📄 {file.path ? file.path.split("/").pop() : "untitled"}
+              {file.path ? file.path.split("/").pop() : "untitled"}
               {modified[file.id] && (
                 <span className="modified-dot" title={`Changed by ${modified[file.id]} since you last opened it`} aria-label="modified">●</span>
               )}
@@ -193,7 +193,7 @@ function FolderItem({
   if (visited.has(folder.id)) {
     return (
       <div className="folder-node" style={{ opacity: 0.5, fontSize: 11 }}>
-        📁 {folder.name} (Cycle detected)
+        {folder.name} (cycle detected)
       </div>
     );
   }
@@ -212,7 +212,7 @@ function FolderItem({
         style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}
       >
         <span>{isOpen ? "▼" : "▶"}</span>
-        <span className="folder-name">📁 {folder.name}</span>
+        <span className="folder-name">{folder.name}</span>
       </div>
       {isOpen && (
         <div className="folder-children" style={{ paddingLeft: 16 }}>

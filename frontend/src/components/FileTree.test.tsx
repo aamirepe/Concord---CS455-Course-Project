@@ -78,7 +78,7 @@ describe("FileTree", () => {
       />
     );
 
-    expect(screen.getByText(/Cycle detected/)).toBeInTheDocument();
+    expect(screen.getByText(/cycle detected/)).toBeInTheDocument();
   });
 
   it("renders orphan folders (parent_folder_id pointing at a nonexistent folder) at the root instead of hiding them", () => {

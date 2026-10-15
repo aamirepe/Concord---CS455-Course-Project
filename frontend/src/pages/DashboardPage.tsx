@@ -121,11 +121,11 @@ export default function DashboardPage() {
 
           <div className="action-grid">
             <div className="action-card">
-              <h3>🚀 Create New Project</h3>
+              <h3>Create New Project</h3>
               <p style={{ opacity: 0.7, fontSize: "14px" }}>Start a new collaborative workspace with your team.</p>
               <div style={{ display: "grid", gap: 8 }}>
                 <input
-                  placeholder="Project name..."
+                  placeholder="Project name"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   style={{ padding: "8px", background: "var(--bg)", border: "1px solid var(--border)", color: "var(--fg)", borderRadius: "4px" }}
@@ -137,8 +137,8 @@ export default function DashboardPage() {
             </div>
 
             <div className="action-card">
-              <h3>🤝 Join Existing Project</h3>
-              <p style={{ opacity: 0.7, fontSize: "14px" }}>Enter a project ID to jump in.</p>
+              <h3>Join Existing Project</h3>
+              <p style={{ opacity: 0.7, fontSize: "14px" }}>Enter a project ID to open it or request access.</p>
               <div style={{ display: "grid", gap: 8 }}>
                 <input
                   placeholder="Project ID"
@@ -164,7 +164,7 @@ export default function DashboardPage() {
             <h3>Your Active Projects</h3>
             {projects.length === 0 ? (
               <div style={{ textAlign: "center", padding: "40px", opacity: 0.5, border: "1px dashed var(--border)", borderRadius: "8px" }}>
-                No projects found. Create one to get started!
+                No projects yet. Create a project or join an existing one.
               </div>
             ) : (
               <div className="project-grid">
