@@ -1,6 +1,8 @@
 """Searching a project's files, including edits nobody has saved yet."""
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from app.api import search as search_module
@@ -63,3 +65,24 @@ async def test_search_caps_results_and_long_lines(client, db, project, monkeypat
     first = body["files"][0]["matches"][0]
     assert len(first["preview"]) == 200
     assert first["preview"][first["preview_column"]:first["preview_column"] + 6] == "needle"
+
+
+def _units(text: str) -> bytes:
+    return text.encode("utf-16-le")
+
+
+def test_offsets_count_utf16_units_like_the_browser():
+    pattern = re.compile(re.escape("needle"))
+    (m,) = search_module.search_text("\U0001F600 needle", pattern, 10)
+    assert (m.column, m.length, m.preview_column) == (4, 6, 3)  # the emoji is two units, not one
+
+    # A match that itself contains a character outside the BMP.
+    (m,) = search_module.search_text("ab\U0001F600cd", re.compile(re.escape("b\U0001F600c")), 10)
+    assert (m.column, m.length) == (2, 4)
+
+
+def test_preview_highlight_lines_up_after_non_bmp_characters():
+    line = "\U0001F600" * 150 + "needle" + "y" * 150
+    (m,) = search_module.search_text(line, re.compile("needle"), 10)
+    units = _units(m.preview)
+    assert units[2 * m.preview_column:2 * (m.preview_column + m.length)].decode("utf-16-le") == "needle"

@@ -45,6 +45,11 @@ def _preview(line: str, start: int, length: int) -> tuple[str, int]:
     return line[lo:lo + PREVIEW_CHARS], start - lo
 
 
+def _utf16_len(text: str) -> int:
+    """Length in UTF-16 code units, which is what Monaco columns and JavaScript ``slice`` count."""
+    return len(text.encode("utf-16-le")) // 2
+
+
 def search_text(text: str, pattern: re.Pattern[str], limit: int) -> list[SearchMatch]:
     out: list[SearchMatch] = []
     for n, line in enumerate(text.splitlines(), start=1):
@@ -52,8 +57,11 @@ def search_text(text: str, pattern: re.Pattern[str], limit: int) -> list[SearchM
             if m.end() == m.start():
                 continue
             preview, col = _preview(line, m.start(), m.end() - m.start())
-            out.append(SearchMatch(line=n, column=m.start() + 1, length=m.end() - m.start(),
-                                   preview=preview, preview_column=col))
+            # Python counts code points; the browser counts UTF-16 units, which differ
+            # for characters outside the Basic Multilingual Plane (emoji and the like).
+            out.append(SearchMatch(line=n, column=_utf16_len(line[:m.start()]) + 1,
+                                   length=_utf16_len(m.group()),
+                                   preview=preview, preview_column=_utf16_len(preview[:col])))
             if len(out) >= limit:
                 return out
     return out
