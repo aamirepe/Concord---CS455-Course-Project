@@ -4,6 +4,73 @@ import pytest
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("bad_path", "message"),
+    [
+        ("/absolute.py", "must be relative"),
+        ("C:/absolute.py", "must be relative"),
+        ("../escape.py", "must not contain '..' segments"),
+        ("src/./main.py", "must not contain '.' segments"),
+        ("src//main.py", "must not contain empty segments"),
+        ("src\\main.py", "must use forward slashes"),
+        ("src/\x00main.py", "must not contain control characters"),
+    ],
+    ids=[
+        "leading-slash",
+        "drive-absolute",
+        "parent-segment",
+        "current-segment",
+        "empty-segment",
+        "backslash",
+        "control-character",
+    ],
+)
+async def test_file_path_validation_rejects_create_and_rename(
+    client, project, bad_path, message
+):
+    headers = {"Authorization": f"Bearer {project['owner']['token']}"}
+    project_id = project["id"]
+    file_id = (
+        await client.get(f"/projects/{project_id}/files", headers=headers)
+    ).json()[0]["id"]
+
+    created = await client.post(
+        f"/projects/{project_id}/files", json={"path": bad_path}, headers=headers
+    )
+    assert created.status_code == 422
+    assert message in created.text
+
+    renamed = await client.patch(
+        f"/projects/{project_id}/files/{file_id}",
+        json={"path": bad_path},
+        headers=headers,
+    )
+    assert renamed.status_code == 422
+    assert message in renamed.text
+
+
+@pytest.mark.asyncio
+async def test_nested_file_paths_are_valid_on_create_and_rename(client, project):
+    headers = {"Authorization": f"Bearer {project['owner']['token']}"}
+    project_id = project["id"]
+
+    created = await client.post(
+        f"/projects/{project_id}/files",
+        json={"path": "src/package/module.py"},
+        headers=headers,
+    )
+    assert created.status_code == 201, created.text
+
+    renamed = await client.patch(
+        f"/projects/{project_id}/files/{created.json()['id']}",
+        json={"path": "tests/unit/test_module.py"},
+        headers=headers,
+    )
+    assert renamed.status_code == 200, renamed.text
+    assert renamed.json()["path"] == "tests/unit/test_module.py"
+
+
+@pytest.mark.asyncio
 async def test_viewer_cannot_create_file(client, project):
     a, b = project["owner"], project["other"]
     project_id = project["id"]
