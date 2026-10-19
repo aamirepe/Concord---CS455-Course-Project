@@ -102,6 +102,8 @@ class DebugRun:
         self.stderr: list[str] = []
         self._out_chars = 0
         self._step_timing: dict = {}
+        self._defer_variables = False
+        self._details_task: asyncio.Task[None] | None = None
 
     # --- helpers -----------------------------------------------------------
 
@@ -211,6 +213,7 @@ class DebugRun:
             log.warning("debug session %d failed: %s", self.t.execution_id, e, exc_info=True)
             reason, error = "error", str(e) or type(e).__name__
         finally:
+            await self._cancel_details()
             if not self.dap.done:
                 with contextlib.suppress(Exception):
                     await asyncio.wait_for(self.dap.disconnect(terminate=True), 3)
@@ -244,10 +247,14 @@ class DebugRun:
         elif event == "stopped":
             self.paused = True
             self.thread_id = body.get("threadId") or self.thread_id
-            state = await self._paused_state(body.get("reason", "pause"), body.get("text"))
+            state = await self._paused_state(body.get("reason", "pause"), body.get("text"),
+                                             include_variables=not self._defer_variables)
             await self.publish("debug_paused", **state)
             await self._state({"type": "debug_paused", "execution_id": self.t.execution_id, **state})
+            if self._defer_variables and state["stack"]:
+                self._details_task = asyncio.create_task(self._publish_details(state))
         elif event == "continued":
+            await self._cancel_details()
             if self.paused:
                 self.paused = False
                 await self.publish("debug_running", by=self.last_by)
@@ -258,7 +265,7 @@ class DebugRun:
             return True
         return False
 
-    async def _paused_state(self, reason: str, text: str | None) -> dict:
+    async def _paused_state(self, reason: str, text: str | None, *, include_variables: bool = True) -> dict:
         started = perf_counter_ns()
         frames = await self.dap.stack_trace(self.thread_id) if self.thread_id is not None else []
         self._log_stage("stack_trace", started)
@@ -270,12 +277,29 @@ class DebugRun:
             stack.append({"id": fr.get("id"), "name": fr.get("name"), "line": fr.get("line"),
                           "path": rel, "file_id": self.t.file_ids.get(rel)})
         top = stack[0] if stack else None
-        scopes, variables = await self._frame_scopes(top["id"]) if top else ([], [])
+        scopes, variables = await self._frame_scopes(top["id"]) if top and include_variables else ([], [])
         return {
             "reason": reason, "description": text, "by": self.last_by,
             "path": top["path"] if top else None, "file_id": top["file_id"] if top else None,
             "line": top["line"] if top else None, "stack": stack, "scopes": scopes, "variables": variables,
         }
+
+    async def _cancel_details(self) -> None:
+        task, self._details_task = self._details_task, None
+        if task is not None:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+    async def _publish_details(self, state: dict) -> None:
+        try:
+            frame_id = state["stack"][0]["id"]
+            scopes, variables = await self._frame_scopes(frame_id)
+            await self._state({"type": "debug_paused", "execution_id": self.t.execution_id,
+                               **state, "scopes": scopes, "variables": variables})
+            await self.publish("debug_frame", frame_id=frame_id, scopes=scopes, variables=variables)
+        except (DapProtocolError, ConnectionError, TimeoutError, ValueError):
+            log.warning("could not load paused frame variables", exc_info=True)
 
     async def _frame_scopes(self, frame_id: int) -> tuple[list[dict], list[dict]]:
         started = perf_counter_ns()
@@ -305,6 +329,9 @@ class DebugRun:
 
     async def _handle_command(self, cmd: dict) -> None:
         name = cmd.get("command")
+        if name in ("continue", "next", "stepIn", "stepOut", "pause"):
+            await self._cancel_details()
+            self._defer_variables = True
         if name in ("continue", "next", "stepIn", "stepOut", "pause"):
             self._step_timing = dict(cmd.get("_timing") or {})
             log.debug("debug_step stage=command_received execution=%s trace=%s at_ns=%s",
