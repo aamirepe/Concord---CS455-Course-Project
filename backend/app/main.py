@@ -11,10 +11,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Awaitable
 from contextlib import asynccontextmanager
+from typing import cast
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from sqlalchemy import text
 
 from app.api import (
     activity,
@@ -31,7 +35,9 @@ from app.api import (
     snapshots,
 )
 from app.core.config import get_settings
+from app.db import session as db_session
 from app.realtime.checkpoint import checkpoint_loop, checkpoint_once
+from app.realtime.execution_queue import QUEUE_META_HASH, async_redis
 from app.realtime.gateway import ws_router
 from app.realtime.manager import room_manager
 from app.realtime.orphan_sweep import sweep_orphans
@@ -106,5 +112,31 @@ async def test_me() -> dict:
     return {"status": "ok", "message": "I am alive!"}
 
 @app.get("/healthz", tags=["meta"])
-async def healthz() -> dict:
-    return {"status": "ok", "service": "concord-backend"}
+async def healthz() -> JSONResponse:
+    database, redis = "down", "down"
+    queue_depth = None
+    try:
+        async with asyncio.timeout(2):
+            async with db_session.AsyncSessionLocal() as session:
+                await session.execute(text("SELECT 1"))
+        database = "ok"
+    except Exception:
+        log.warning("Health check: database unavailable")
+    try:
+        async with asyncio.timeout(2):
+            client = async_redis()
+            await client.ping()
+            queue_depth = int(await cast(Awaitable[int], client.hlen(QUEUE_META_HASH)))
+        redis = "ok"
+    except Exception:
+        log.warning("Health check: Redis unavailable")
+    return JSONResponse(
+        status_code=200 if database == "ok" else 503,
+        content={
+            "status": "ok" if database == redis == "ok" else "degraded",
+            "service": "concord-backend",
+            "database": database,
+            "redis": redis,
+            "queue_depth": queue_depth,
+        },
+    )
