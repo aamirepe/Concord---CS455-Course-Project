@@ -76,6 +76,8 @@ async def get_state(execution_id: int) -> dict | None:
 
 async def send_command(execution_id: int, command: dict) -> int:
     """Publish a command to the worker; returns how many listeners got it (0: none)."""
+    if command.get("command") not in STEP_COMMANDS:
+        return int(await _redis().publish(COMMAND_CHANNEL_PREFIX + str(execution_id), json.dumps(command)))
     command = {**command, "_timing": {"id": uuid4().hex, "published_ns": time_ns()}}
     listeners = int(await _redis().publish(COMMAND_CHANNEL_PREFIX + str(execution_id), json.dumps(command)))
     log.debug("debug_step stage=command_published execution=%s trace=%s at_ns=%s",
