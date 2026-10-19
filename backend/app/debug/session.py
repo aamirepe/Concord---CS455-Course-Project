@@ -247,7 +247,7 @@ class DebugRun:
         elif event == "stopped":
             self.paused = True
             self.thread_id = body.get("threadId") or self.thread_id
-            defer_variables = self._defer_variables and body.get("reason") == "step"
+            defer_variables = self._defer_variables
             state = await self._paused_state(body.get("reason", "pause"), body.get("text"),
                                              include_variables=not defer_variables)
             await self.publish("debug_paused", **state)
@@ -330,6 +330,10 @@ class DebugRun:
 
     async def _handle_command(self, cmd: dict) -> None:
         name = cmd.get("command")
+        if name in ("continue", "next", "stepIn", "stepOut") and (not self.paused or self.thread_id is None):
+            return
+        if name == "pause" and self.paused:
+            return
         if name == "frame":
             await self._cancel_details()
         if name in ("continue", "next", "stepIn", "stepOut", "pause"):

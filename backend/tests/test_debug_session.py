@@ -253,8 +253,15 @@ async def test_a_failed_command_is_reported_not_fatal():
 
 
 @pytest.mark.asyncio
-async def test_step_location_does_not_wait_for_variables(monkeypatch):
-    run, commands, events, _ = _session(FakeAdapter())
+@pytest.mark.parametrize("stop_reason", ["step", "breakpoint"])
+async def test_step_location_does_not_wait_for_variables(monkeypatch, stop_reason):
+    class StepReasonAdapter(FakeAdapter):
+        def _event(self, event, body=None):
+            if event == "stopped" and body and body.get("reason") == "step":
+                body = {**body, "reason": stop_reason}
+            super()._event(event, body)
+
+    run, commands, events, _ = _session(StepReasonAdapter())
     original_scopes = run._frame_scopes
     inspecting = asyncio.Event()
     cancelled = asyncio.Event()
@@ -279,6 +286,8 @@ async def test_step_location_does_not_wait_for_variables(monkeypatch):
         stepped = await _until(events, "debug_paused", 2)
         assert stepped["line"] == 3 and stepped["variables"] == []
         await asyncio.wait_for(inspecting.wait(), 1)
+        await run._handle_command({"command": "pause"})
+        assert not cancelled.is_set()
         commands.put_nowait({"command": "next", "username": "bob"})
         assert (await _until(events, "debug_paused", 3))["line"] == 4
         assert cancelled.is_set()
