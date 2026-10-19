@@ -47,6 +47,8 @@ class DockerAdapter:
                 mem_limit=settings.sandbox_mem_limit,
                 cpu_quota=settings.sandbox_cpu_quota,
                 pids_limit=settings.sandbox_pids_limit,
+                cap_drop=["ALL"],
+                security_opt=["no-new-privileges"],
                 read_only=True,
                 user="runner",
                 working_dir="/workspace",
