@@ -247,11 +247,12 @@ class DebugRun:
         elif event == "stopped":
             self.paused = True
             self.thread_id = body.get("threadId") or self.thread_id
+            defer_variables = self._defer_variables and body.get("reason") == "step"
             state = await self._paused_state(body.get("reason", "pause"), body.get("text"),
-                                             include_variables=not self._defer_variables)
+                                             include_variables=not defer_variables)
             await self.publish("debug_paused", **state)
             await self._state({"type": "debug_paused", "execution_id": self.t.execution_id, **state})
-            if self._defer_variables and state["stack"]:
+            if defer_variables and state["stack"]:
                 self._details_task = asyncio.create_task(self._publish_details(state))
         elif event == "continued":
             await self._cancel_details()
@@ -331,7 +332,7 @@ class DebugRun:
         name = cmd.get("command")
         if name in ("continue", "next", "stepIn", "stepOut", "pause"):
             await self._cancel_details()
-            self._defer_variables = True
+            self._defer_variables = name in ("next", "stepIn", "stepOut")
         if name in ("continue", "next", "stepIn", "stepOut", "pause"):
             self._step_timing = dict(cmd.get("_timing") or {})
             log.debug("debug_step stage=command_received execution=%s trace=%s at_ns=%s",

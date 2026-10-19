@@ -313,3 +313,32 @@ async def test_step_variables_update_the_frame_and_late_join_state():
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await task
+
+
+@pytest.mark.asyncio
+async def test_a_breakpoint_after_continue_keeps_complete_variables():
+    class BreakpointAdapter(FakeAdapter):
+        def _handle(self, req):
+            if req["command"] == "continue":
+                self._reply(req)
+                self._event("continued", {"threadId": 1})
+                self._event("stopped", {"reason": "breakpoint", "threadId": 1})
+            else:
+                super()._handle(req)
+
+    run, commands, events, _ = _session(BreakpointAdapter())
+    task = asyncio.create_task(run.run())
+    try:
+        await _until(events, "debug_paused")
+        commands.put_nowait({"command": "next"})
+        await _until(events, "debug_paused", 2)
+        commands.put_nowait({"command": "continue"})
+        breakpoint = await _until(events, "debug_paused", 3)
+        assert breakpoint["reason"] == "breakpoint"
+        assert [v["name"] for v in breakpoint["variables"]] == ["xs", "big"]
+        commands.put_nowait({"command": "stop"})
+        await asyncio.wait_for(task, 1)
+    finally:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
