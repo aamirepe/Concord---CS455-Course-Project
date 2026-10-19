@@ -15,10 +15,37 @@ from jose import jwt
 from pycrdt import Doc, Text
 from wsproto.events import TextMessage
 
+from app.core import login_limiter
 from app.core.security import create_access_token, hash_password
 from app.main import app
 from app.models import User
 from app.realtime.crdt import TEXT_TYPE
+
+
+class _LoginRedis:
+    def __init__(self) -> None:
+        self.values: dict[str, int] = {}
+        self.ttls: dict[str, int] = {}
+
+    async def get(self, key: str) -> int | None:
+        return self.values.get(key)
+
+    async def ttl(self, key: str) -> int:
+        return self.ttls.get(key, -2)
+
+    async def incr(self, key: str) -> int:
+        self.values[key] = self.values.get(key, 0) + 1
+        return self.values[key]
+
+    async def expire(self, key: str, seconds: int) -> bool:
+        self.ttls[key] = seconds
+        return True
+
+    async def delete(self, key: str) -> int:
+        existed = key in self.values
+        self.values.pop(key, None)
+        self.ttls.pop(key, None)
+        return int(existed)
 
 
 def _base64url(value: dict) -> str:
@@ -344,3 +371,89 @@ async def test_websocket_cannot_open_file_from_another_project(client, project):
             with pytest.raises(WebSocketDisconnect) as closed:
                 await websocket.receive()
             assert closed.value.code == 1008
+
+
+@pytest.mark.asyncio
+async def test_traversal_paths_are_rejected_on_file_and_folder_writes(
+    client, project
+):
+    headers = {"Authorization": f"Bearer {project['owner']['token']}"}
+    attacks = [
+        ("POST", f"/projects/{project['id']}/files", {"path": "../secret.py"}),
+        (
+            "PATCH",
+            f"/projects/{project['id']}/files/{project['file_id']}",
+            {"path": "/" + "absolute.py"},
+        ),
+        ("POST", f"/projects/{project['id']}/folders", {"name": ".."}),
+    ]
+    for method, url, body in attacks:
+        response = await client.request(method, url, json=body, headers=headers)
+        assert response.status_code == 422, (url, response.text)
+
+
+@pytest.mark.asyncio
+async def test_standard_input_larger_than_64_kib_is_rejected(client, project):
+    response = await client.post(
+        f"/projects/{project['id']}/executions",
+        json={"file_id": project["file_id"], "stdin": "x" * (64 * 1024 + 1)},
+        headers={"Authorization": f"Bearer {project['owner']['token']}"},
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_oversized_file_content_does_not_crash_websocket(client, project):
+    owner = project["owner"]
+    url = (
+        f"/ws/projects/{project['id']}/files/{project['file_id']}"
+        f"?token={owner['token']}"
+    )
+    async with AsyncClient(
+        transport=ASGIWebSocketTransport(app=app), base_url="http://test"
+    ) as websocket_http:
+        async with aconnect_ws(url, websocket_http) as websocket:
+            await websocket.receive_bytes()
+            document = Doc()
+            document.get(TEXT_TYPE, type=Text).insert(0, "x" * (1024 * 1024 + 1))
+            oversized = base64.b64encode(bytes(document.get_update())).decode()
+            await websocket.send_text(
+                json.dumps({"op": "update", "data": oversized})
+            )
+            for _ in range(10):
+                event = await asyncio.wait_for(websocket.receive(), timeout=2)
+                if isinstance(event, TextMessage):
+                    message = json.loads(event.data)
+                    if message.get("op") == "ack":
+                        break
+            else:
+                pytest.fail("oversized file update was not acknowledged")
+
+
+@pytest.mark.asyncio
+async def test_sixth_wrong_password_is_rate_limited(client, monkeypatch):
+    fake_redis = _LoginRedis()
+    monkeypatch.setattr(login_limiter, "_redis_client", fake_redis)
+    response = await client.post(
+        "/auth/signup",
+        json={
+            "username": "adversarial-login",
+            "email": "adversarial-login@example.com",
+            "password": "supersecret1",
+        },
+    )
+    assert response.status_code == 201
+
+    for _ in range(5):
+        response = await client.post(
+            "/auth/login",
+            json={"username": "adversarial-login", "password": "wrong"},
+        )
+        assert response.status_code == 401
+
+    response = await client.post(
+        "/auth/login",
+        json={"username": "adversarial-login", "password": "wrong"},
+    )
+    assert response.status_code == 429
+    assert response.headers["Retry-After"] == "900"
