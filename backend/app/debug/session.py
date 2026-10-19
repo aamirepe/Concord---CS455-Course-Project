@@ -20,6 +20,7 @@ import logging
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from time import perf_counter_ns, time_ns
 from typing import Any, Protocol
 
 from app.debug.dap import DapClient, DapProtocolError
@@ -100,6 +101,7 @@ class DebugRun:
         self.stdout: list[str] = []
         self.stderr: list[str] = []
         self._out_chars = 0
+        self._step_timing: dict = {}
 
     # --- helpers -----------------------------------------------------------
 
@@ -113,7 +115,13 @@ class DebugRun:
 
     async def publish(self, event_type: str, **fields: Any) -> None:
         try:
-            await self._publish({"type": event_type, "execution_id": self.t.execution_id, **fields})
+            event = {"type": event_type, "execution_id": self.t.execution_id, **fields}
+            if event_type == "debug_paused" and self._step_timing:
+                event["_timing"] = self._step_timing
+            await self._publish(event)
+            if event_type == "debug_paused" and self._step_timing:
+                log.debug("debug_step stage=event_published execution=%s trace=%s at_ns=%s",
+                          self.t.execution_id, self._step_timing.get("id"), time_ns())
         except Exception:
             log.warning("could not publish %s", event_type, exc_info=True)
 
@@ -251,7 +259,9 @@ class DebugRun:
         return False
 
     async def _paused_state(self, reason: str, text: str | None) -> dict:
+        started = perf_counter_ns()
         frames = await self.dap.stack_trace(self.thread_id) if self.thread_id is not None else []
+        self._log_stage("stack_trace", started)
         stack: list[dict[str, Any]] = []
         for fr in frames:
             rel = self._rel((fr.get("source") or {}).get("path"))
@@ -268,9 +278,13 @@ class DebugRun:
         }
 
     async def _frame_scopes(self, frame_id: int) -> tuple[list[dict], list[dict]]:
+        started = perf_counter_ns()
         raw = await self.dap.scopes(frame_id)
+        self._log_stage("scopes", started)
         scopes = [{"name": s.get("name"), "ref": s.get("variablesReference")} for s in raw]
+        started = perf_counter_ns()
         first = await self._variables(scopes[0]["ref"]) if scopes and scopes[0]["ref"] else []
+        self._log_stage("variables", started)
         return scopes, first
 
     async def _variables(self, ref: int) -> list[dict]:
@@ -284,16 +298,27 @@ class DebugRun:
             })
         return out
 
+    def _log_stage(self, stage: str, started: int) -> None:
+        log.debug("debug_step stage=%s execution=%s trace=%s duration_ms=%.3f at_ns=%s",
+                  stage, self.t.execution_id, self._step_timing.get("id"),
+                  (perf_counter_ns() - started) / 1_000_000, time_ns())
+
     async def _handle_command(self, cmd: dict) -> None:
         name = cmd.get("command")
+        if name in ("continue", "next", "stepIn", "stepOut", "pause"):
+            self._step_timing = dict(cmd.get("_timing") or {})
+            log.debug("debug_step stage=command_received execution=%s trace=%s at_ns=%s",
+                      self.t.execution_id, self._step_timing.get("id"), time_ns())
         who = cmd.get("username")
         try:
             if name in ("continue", "next", "stepIn", "stepOut"):
                 if not self.paused or self.thread_id is None:
                     return
                 self.last_by = who
+                started = perf_counter_ns()
                 await {"continue": self.dap.continue_, "next": self.dap.next,
                        "stepIn": self.dap.step_in, "stepOut": self.dap.step_out}[name](self.thread_id)
+                self._log_stage("dap_response", started)
             elif name == "pause":
                 if not self.paused:
                     self.last_by = who
