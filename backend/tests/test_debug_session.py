@@ -250,3 +250,66 @@ async def test_a_failed_command_is_reported_not_fatal():
     run.paused = True
     commands.put_nowait({"command": "stop"})
     assert (await asyncio.wait_for(task, 5)).reason == "stopped"
+
+
+@pytest.mark.asyncio
+async def test_step_location_does_not_wait_for_variables(monkeypatch):
+    run, commands, events, _ = _session(FakeAdapter())
+    original_scopes = run._frame_scopes
+    inspecting = asyncio.Event()
+    cancelled = asyncio.Event()
+    calls = 0
+
+    async def delayed_scopes(frame_id):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return await original_scopes(frame_id)
+        inspecting.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+
+    monkeypatch.setattr(run, "_frame_scopes", delayed_scopes)
+    task = asyncio.create_task(run.run())
+    try:
+        await _until(events, "debug_paused")
+        commands.put_nowait({"command": "next", "username": "bob"})
+        stepped = await _until(events, "debug_paused", 2)
+        assert stepped["line"] == 3 and stepped["variables"] == []
+        await asyncio.wait_for(inspecting.wait(), 1)
+        commands.put_nowait({"command": "next", "username": "bob"})
+        assert (await _until(events, "debug_paused", 3))["line"] == 4
+        assert cancelled.is_set()
+        assert not any(e["type"] == "debug_frame" for e in events)
+        commands.put_nowait({"command": "stop"})
+        assert (await asyncio.wait_for(task, 1)).reason == "stopped"
+        assert run._details_task is None
+    finally:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+
+@pytest.mark.asyncio
+async def test_step_variables_update_the_frame_and_late_join_state():
+    run, commands, events, states = _session(FakeAdapter())
+    task = asyncio.create_task(run.run())
+    try:
+        await _until(events, "debug_paused")
+        commands.put_nowait({"command": "next", "username": "bob"})
+        paused = await _until(events, "debug_paused", 2)
+        frame = await _until(events, "debug_frame")
+        assert frame["frame_id"] == paused["stack"][0]["id"]
+        assert [v["name"] for v in frame["variables"]] == ["xs", "big"]
+        assert states[-1]["line"] == paused["line"] == 3
+        assert states[-1]["variables"] == frame["variables"]
+        assert states[-1]["scopes"] == frame["scopes"]
+        commands.put_nowait({"command": "stop"})
+        await asyncio.wait_for(task, 1)
+        assert states[-1] is None
+    finally:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
