@@ -196,3 +196,23 @@ async def test_stopped_debug_session_does_not_protect_stale_execution(db, projec
     await db.refresh(execution)
     assert execution.status == ExecutionStatus.FAILED
     assert cancelled == [execution.id]
+
+
+async def test_sweeper_appends_failed_event_in_same_transaction(db, project):
+    from sqlalchemy import select
+
+    from app.models import ExecutionEvent
+
+    run = Execution(project_id=project["id"], file_id=project["file_id"],
+                    status=ExecutionStatus.RUNNING,
+                    started_at=datetime.now(UTC) - ORPHAN_THRESHOLD - timedelta(seconds=1))
+    db.add(run)
+    await db.commit()
+    assert await sweep_once(db) == 1
+    event = (await db.execute(select(ExecutionEvent).where(
+        ExecutionEvent.execution_id == run.id))).scalar_one()
+    assert event.event_type == "failed"
+    assert event.payload["from"] == "running"
+    assert event.payload["to"] == "failed"
+    assert event.payload["by"] == "sweeper"
+    assert await sweep_once(db) == 0
