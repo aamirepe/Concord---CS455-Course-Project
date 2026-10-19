@@ -1,0 +1,23 @@
+# Multi-stage prod build for the frontend.
+# Stage 1: build the Vite bundle.
+# Stage 2: serve it with a tiny static server (caddy) on :80, which
+# docker-compose.prod.yml already wires to the public Caddy.
+#
+# Built artifact: ${FRONTEND_IMAGE} in docker-compose.prod.yml.
+
+FROM node:20-alpine AS build
+WORKDIR /app
+COPY package.json package-lock.json* ./
+RUN npm ci || npm install
+COPY . .
+# Vite inlines these at build time, so they must be passed as build args.
+ARG VITE_API_URL
+ARG VITE_WS_URL
+ENV VITE_API_URL=$VITE_API_URL VITE_WS_URL=$VITE_WS_URL
+RUN npm run build
+
+FROM caddy:2-alpine
+# Vite outputs to dist/ by default.
+COPY --from=build /app/dist /srv
+COPY Caddyfile /etc/caddy/Caddyfile
+EXPOSE 80
