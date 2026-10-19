@@ -1,36 +1,42 @@
 #!/usr/bin/env bash
-# Provision a fresh Ubuntu 22.04 EC2 / Oracle Cloud VM for Concord.
-# Idempotent : safe to re-run.
-
+# Prepare an Ubuntu server. Review docs/deployment.md before running.
 set -euo pipefail
-
-echo "==> Installing Docker"
-curl -fsSL https://get.docker.com | sh
-sudo usermod -aG docker "$USER"
-
-echo "==> Installing Docker Compose plugin"
-sudo apt-get update
-sudo apt-get install -y docker-compose-plugin
-
-echo "==> Cloning the repo"
-if [ ! -d "$HOME/concord" ]; then
-  git clone https://github.com/YOUR-ORG/concord.git "$HOME/concord"
+if ! command -v docker >/dev/null; then
+  curl -fsSL https://get.docker.com | sudo sh
+  sudo usermod -aG docker "$USER"
+  echo "Log out and in to activate Docker access, then run this script again."
+  exit 0
+fi
+docker info >/dev/null
+docker compose version >/dev/null
+if [ ! -d "$HOME/concord/.git" ]; then
+  git clone https://github.com/aamirepe/Concord---CS455-Course-Project.git "$HOME/concord"
 fi
 cd "$HOME/concord"
-
-echo "==> Creating .env from .env.example"
+umask 077
 if [ ! -f .env ]; then
   cp .env.example .env
-  # Generate a real secret.
-  sed -i "s/change-me-in-prod-32-bytes-minimum/$(openssl rand -hex 32)/" .env
+  secret=$(openssl rand -hex 32)
+  database_password=$(openssl rand -hex 24)
+  encryption_key=$(openssl rand -hex 32)
+  sed -i "s/^SECRET_KEY=.*/SECRET_KEY=$secret/; s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$database_password/; s|^DATABASE_URL=.*|DATABASE_URL=postgresql+asyncpg://concord:$database_password@postgres:5432/concord|; s/^LLM_ENCRYPTION_KEY=.*/LLM_ENCRYPTION_KEY=$encryption_key/; s/^APP_ENV=.*/APP_ENV=prod/" .env
 fi
-
-echo "==> Building sandbox image"
-docker build -t concord-sandbox:latest ./sandbox
-
-echo "==> Starting the stack"
-docker compose -f docker-compose.prod.yml up -d
-
-echo "==> Done. Visit http://<host>"
-echo "    First-time TLS: point your domain's A record at this VM and Caddy will"
-echo "    auto-issue a Let's Encrypt cert on the next request."
+if [ ! -f .env.production ]; then
+  cat > .env.production <<'CONFIG'
+BACKEND_IMAGE=
+WORKER_IMAGE=
+FRONTEND_IMAGE=
+CONCORD_DOMAIN=
+CONFIG
+fi
+chmod 600 .env .env.production
+for language in python cpp nodejs; do
+  dockerfile=sandbox/Dockerfile
+  image=concord-sandbox:latest
+  if [ "$language" != python ]; then
+    dockerfile="sandbox/Dockerfile.$language"
+    image="concord-sandbox-$language:latest"
+  fi
+  docker build -t "$image" -f "$dockerfile" sandbox
+done
+echo "Set image references, domain and CORS_ORIGINS using docs/deployment.md before starting."

@@ -4,5 +4,6 @@
     root * /srv
     encode zstd gzip
     try_files {path} /index.html
+    header X-Content-Type-Options nosniff
     file_server
 }

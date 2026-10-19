@@ -1,7 +1,7 @@
 name: deploy
 
-# Runs after the "ci" workflow succeeds on main, or by hand. It never deploys a
-# commit whose tests failed. Until the secrets below are configured it skips
+# Runs after the "ci" workflow succeeds on main, and only for pushes. It never deploys a
+# commit whose tests failed. Manual execution is disabled. Until the secrets below are configured it skips
 # with a notice instead of failing every push.
 #
 # Required repository secrets:
@@ -9,7 +9,7 @@ name: deploy
 #   ECR_REPO_BACKEND, ECR_REPO_FRONTEND, ECR_REPO_WORKER
 #   CONCORD_DOMAIN                            public host name, e.g. concord.example.com
 #   DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY  the server
-# The server needs the repo cloned at ~/concord, a filled-in ~/concord/.env,
+# The server needs the repo cloned at ~/concord, a filled-in ~/concord/.env (including CONCORD_DOMAIN and CORS_ORIGINS),
 # Docker with the compose plugin, and the AWS CLI with permission to pull from ECR.
 
 on:
@@ -17,20 +17,26 @@ on:
     workflows: [ci]
     types: [completed]
     branches: [main]
-  workflow_dispatch:
 
 concurrency:
   group: deploy
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 env:
   AWS_REGION: us-east-1
   # workflow_run starts on the default branch's latest commit; deploy the one CI tested.
-  DEPLOY_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+  DEPLOY_SHA: ${{ github.event.workflow_run.head_sha }}
 
 jobs:
   check:
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-latest
     outputs:
       ready: ${{ steps.secrets.outputs.ready }}
@@ -46,10 +52,11 @@ jobs:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_HOST_FINGERPRINT: ${{ secrets.DEPLOY_HOST_FINGERPRINT }}
         run: |
           missing=""
           for name in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY ECR_REPO_BACKEND ECR_REPO_FRONTEND \
-                      ECR_REPO_WORKER CONCORD_DOMAIN DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY; do
+                      ECR_REPO_WORKER CONCORD_DOMAIN DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY DEPLOY_HOST_FINGERPRINT; do
             [ -n "${!name}" ] || missing="$missing $name"
           done
           if [ -n "$missing" ]; then
@@ -121,15 +128,22 @@ jobs:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
+          fingerprint: ${{ secrets.DEPLOY_HOST_FINGERPRINT }}
+          command_timeout: 30m
           envs: REGISTRY,BACKEND_IMAGE,WORKER_IMAGE,FRONTEND_IMAGE,DEPLOY_SHA,AWS_REGION
           script: |
             set -eu
             cd ~/concord
             git fetch --quiet origin
-            git checkout --quiet "$DEPLOY_SHA"
-            # .env.deploy pins the images; deploy/compose.sh loads it (see docs/runbook.md).
+            git diff --quiet
+            git diff --cached --quiet
+            git merge-base --is-ancestor "$DEPLOY_SHA" origin/main
+            git checkout --quiet --detach "$DEPLOY_SHA"
+            # Keep the previous image pins for rollback.
+            umask 077
+            if [ -f .env.production ]; then cp .env.production .env.production.bak; fi
             printf 'BACKEND_IMAGE=%s\nWORKER_IMAGE=%s\nFRONTEND_IMAGE=%s\n' \
-              "$BACKEND_IMAGE" "$WORKER_IMAGE" "$FRONTEND_IMAGE" > .env.deploy
+              "$BACKEND_IMAGE" "$WORKER_IMAGE" "$FRONTEND_IMAGE" > .env.production
             aws ecr get-login-password --region "$AWS_REGION" \
               | docker login --username AWS --password-stdin "$REGISTRY"
             # The worker starts sandboxes from these local images.
@@ -137,5 +151,4 @@ jobs:
             docker build -q -t concord-sandbox-cpp:latest -f sandbox/Dockerfile.cpp ./sandbox
             docker build -q -t concord-sandbox-nodejs:latest -f sandbox/Dockerfile.nodejs ./sandbox
             ./deploy/compose.sh pull
-            ./deploy/compose.sh up -d --remove-orphans
-            docker image prune -f
+            ./deploy/compose.sh up -d --remove-orphans --wait --wait-timeout 180

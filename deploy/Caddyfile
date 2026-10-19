@@ -12,6 +12,7 @@
 
 {$CONCORD_DOMAIN:localhost} {
     encode zstd gzip
+    header X-Content-Type-Options nosniff
 
     handle_path /api/* {
         reverse_proxy backend:8000
