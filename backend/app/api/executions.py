@@ -30,6 +30,7 @@ from app.realtime.manager import room_manager
 from app.realtime.source import get_file_text
 from app.runtime.registry import PLAINTEXT
 from app.schemas import ExecutionOut, RunRequest
+from app.services.execution_state import change_status, record_status_event
 
 router = APIRouter(prefix="/projects/{project_id}/executions", tags=["executions"])
 log = logging.getLogger(__name__)
@@ -86,6 +87,8 @@ async def start_run(
     db.add(execution)
     await db.flush()
 
+    record_status_event(db, execution.id, None, ExecutionStatus.QUEUED, by="api")
+
     debug_session_info = None
     if debug:
         await _claim_debug_slot(db, project_id, execution, file_obj, user)
@@ -138,15 +141,11 @@ async def start_run(
 async def _fail_undelivered_run(db: AsyncSession, project_id: int, execution_id: int, debug: bool) -> bool:
     """Compete with the worker's queued-to-starting claim before compensating."""
     finished_at = datetime.now(UTC)
-    failed = (await db.execute(
-        update(Execution)
-        .where(Execution.id == execution_id, Execution.status == ExecutionStatus.QUEUED)
-        .values(status=ExecutionStatus.FAILED, finished_at=finished_at,
-                stderr="Execution queue delivery failed; please try again")
-        .returning(Execution.id)
-        .execution_options(synchronize_session=False)
-    )).scalar_one_or_none()
-    if failed is None:
+    execution = await db.get(Execution, execution_id, populate_existing=True)
+    if execution is None or execution.status != ExecutionStatus.QUEUED or not await change_status(
+        db, execution, ExecutionStatus.FAILED, by="api", finished_at=finished_at,
+        stderr="Execution queue delivery failed; please try again",
+    ):
         await db.rollback()
         return False
     if debug:
@@ -273,8 +272,11 @@ async def cancel_execution(
     }:
         return ExecutionOut.model_validate(execution)
 
-    execution.status = ExecutionStatus.CANCELLED
-    execution.finished_at = datetime.now(UTC)
+    if not await change_status(
+        db, execution, ExecutionStatus.CANCELLED, by="api", finished_at=datetime.now(UTC),
+    ):
+        await db.refresh(execution)
+        return ExecutionOut.model_validate(execution)
     await db.commit()
     await db.refresh(execution)
 

@@ -16,6 +16,7 @@ from app.core.config import get_settings
 from app.db.session import AsyncSessionLocal
 from app.models import DebugSession, DebugStatus, Execution, ExecutionStatus
 from app.realtime.execution_queue import signal_cancel
+from app.services.execution_state import change_status
 
 log = logging.getLogger(__name__)
 
@@ -52,30 +53,32 @@ async def sweep_once(db: AsyncSession) -> int:
     result = await db.execute(stmt)
     orphaned_executions = result.scalars().all()
 
+    changed = []
     for execution in orphaned_executions:
         log.warning(
             "Found orphaned execution %d (status: %s, started: %s), "
             "marking as failed due to worker death",
             execution.id, execution.status, execution.started_at
         )
-        execution.status = ExecutionStatus.FAILED
-        execution.finished_at = datetime.now(UTC)
-        execution.stderr = "Worker died mid-execution (orphan sweep)"
-        db.add(execution)
+        if await change_status(
+            db, execution, ExecutionStatus.FAILED, by="sweeper", finished_at=now,
+            stderr="Worker died mid-execution (orphan sweep)",
+        ):
+            changed.append(execution)
 
-    if orphaned_executions:
+    if changed:
         await db.commit()
-        log.info("Marked %d orphaned executions as failed", len(orphaned_executions))
+        log.info("Marked %d orphaned executions as failed", len(changed))
 
     # Best effort: if the worker is alive but stuck, this makes it kill the
     # container. A Redis outage must not undo the DB state change above.
-    for execution in orphaned_executions:
+    for execution in changed:
         try:
             await signal_cancel(execution.id)
         except Exception as e:
             log.warning("Could not signal cancel for execution %d: %s", execution.id, e)
 
-    return len(orphaned_executions)
+    return len(changed)
 
 
 async def sweep_orphans() -> None:

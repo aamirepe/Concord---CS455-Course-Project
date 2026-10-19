@@ -31,19 +31,19 @@ from app.realtime.execution_queue import (
     publish_project_event,
 )
 from app.services.sandbox import RunResult, prepare_workspace, sandbox
+from app.services.execution_state import change_status, record_status_event
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("worker")
 
-async def _transition(execution_id: int, status: ExecutionStatus, **kwargs) -> None:
-    """Update execution status and metadata in DB."""
+async def _transition(execution_id: int, status: ExecutionStatus, **kwargs) -> bool:
+    """Commit only an allowed transition together with its audit event."""
     async with AsyncSessionLocal() as db:
         execution = await db.get(Execution, execution_id)
-        if execution:
-            execution.status = status
-            for k, v in kwargs.items():
-                setattr(execution, k, v)
+        if execution and await change_status(db, execution, status, by="worker", **kwargs):
             await db.commit()
+            return True
+        return False
 
 async def _publish_status(project_id: int, execution_id: int, status: str) -> None:
     """Broadcast status update to the project."""
@@ -112,6 +112,9 @@ async def _run_one(payload: dict) -> None:
                     started_at=datetime.now(timezone.utc))
             .returning(Execution.id)
         )).scalar_one_or_none()
+        if claimed is not None:
+            record_status_event(db, execution_id, ExecutionStatus.QUEUED,
+                                ExecutionStatus.STARTING, by="worker", worker_id=worker_id)
         await db.commit()
         if claimed is None:
             log.info("execution=%d is no longer queued; skipping", execution_id)
