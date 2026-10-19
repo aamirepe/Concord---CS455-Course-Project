@@ -330,6 +330,8 @@ class DebugRun:
 
     async def _handle_command(self, cmd: dict) -> None:
         name = cmd.get("command")
+        if name == "frame":
+            await self._cancel_details()
         if name in ("continue", "next", "stepIn", "stepOut", "pause"):
             await self._cancel_details()
             self._defer_variables = name in ("next", "stepIn", "stepOut")
