@@ -4,7 +4,8 @@ import logging
 import os
 import socket
 import tempfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -30,8 +31,8 @@ from app.realtime.execution_queue import (
     dequeue_execution,
     publish_project_event,
 )
-from app.services.sandbox import RunResult, prepare_workspace, sandbox
 from app.services.execution_state import change_status, record_status_event
+from app.services.sandbox import prepare_workspace, sandbox
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("worker")
@@ -85,8 +86,36 @@ async def _mount_workspace(project_id: int, main_file_id: int, tmpdir: str) -> N
             # 3. Create directory and write file
             full_path = _workspace_path(tmpdir, file.path)
             full_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(full_path, "w", encoding="utf-8") as f:
-                f.write(content)
+            await asyncio.to_thread(full_path.write_text, content, encoding="utf-8")
+
+class ExecutionCancelled(Exception):
+    """The execution was stopped while a sandbox operation was in flight."""
+
+
+async def _run_cancellable(operation, execution_id: int, cancel_event: asyncio.Event):
+    """Join the thread after removing its container, before deleting its workspace.
+
+    Repeating cleanup while Docker creates the container closes the race where
+    cancel arrives between scheduling the thread and creating the container.
+    """
+    if cancel_event.is_set():
+        raise ExecutionCancelled
+    task = asyncio.create_task(asyncio.to_thread(operation))
+    cancel_wait = asyncio.create_task(cancel_event.wait())
+    try:
+        await asyncio.wait({task, cancel_wait}, return_when=asyncio.FIRST_COMPLETED)
+        if cancel_event.is_set():
+            while not task.done():
+                await asyncio.to_thread(sandbox.kill_execution, execution_id)
+                await asyncio.wait({task}, timeout=0.02)
+            await asyncio.to_thread(sandbox.kill_execution, execution_id)
+            await asyncio.gather(task, return_exceptions=True)
+            raise ExecutionCancelled
+        return await task
+    finally:
+        cancel_wait.cancel()
+        await asyncio.gather(cancel_wait, return_exceptions=True)
+
 
 async def _run_one(payload: dict) -> None:
     execution_id = int(payload["execution_id"])
@@ -94,22 +123,16 @@ async def _run_one(payload: dict) -> None:
     file_id = int(payload["file_id"])
     source_text = payload.get("source_text", "")
     debug = payload.get("debug", False)
+    language = payload.get("language", "python")
     worker_id = f"{socket.gethostname()}-{os.getpid()}"
 
-    language = payload.get("language", "python")
-
-    log.info("worker=%s picked up execution=%d (debug=%s)", worker_id, execution_id, debug)
-
-    # Claim only a queued run, atomically with its status change. A queue
-    # delivery can lose its acknowledgement after writing the payload; the
-    # API may already have marked that run failed when we receive it.
     async with AsyncSessionLocal() as db:
         claimed = (await db.execute(
             update(Execution)
             .where(Execution.id == execution_id, Execution.project_id == project_id,
                    Execution.file_id == file_id, Execution.status == ExecutionStatus.QUEUED)
             .values(status=ExecutionStatus.STARTING, worker_id=worker_id,
-                    started_at=datetime.now(timezone.utc))
+                    started_at=datetime.now(UTC))
             .returning(Execution.id)
         )).scalar_one_or_none()
         if claimed is not None:
@@ -121,28 +144,31 @@ async def _run_one(payload: dict) -> None:
             return
     await _publish_status(project_id, execution_id, "starting")
 
+    cancel_event = asyncio.Event()
+    cancel_sub = None
+    pubsub = None
+    listener = None
     try:
-        cancel_event = asyncio.Event()
-        cancel_sub = None
-        listener = None
         try:
             cancel_sub = aioredis_async.from_url(get_settings().redis_url, decode_responses=False)
             pubsub = cancel_sub.pubsub()
             await pubsub.subscribe(CANCEL_CHANNEL_PREFIX + str(execution_id))
 
-            async def _listen_cancel() -> None:
-                try:
-                    async for msg in pubsub.listen():
-                        if msg.get("type") == "message":
-                            cancel_event.set()
-                            return
-                except Exception:
-                    log.warning("cancel listener crashed", exc_info=True)
+            async def listen_cancel() -> None:
+                async for msg in pubsub.listen():
+                    if msg.get("type") == "message":
+                        cancel_event.set()
+                        return
 
-            listener = asyncio.create_task(_listen_cancel())
+            listener = asyncio.create_task(listen_cancel())
         except Exception:
-            cancel_sub = None
-            listener = None
+            log.warning("could not subscribe to cancellation", exc_info=True)
+
+        # A cancel may have been persisted before the Redis subscription opened.
+        async with AsyncSessionLocal() as db:
+            current = await db.get(Execution, execution_id)
+            if current is None or current.status != ExecutionStatus.STARTING:
+                raise ExecutionCancelled
 
         from app.runtime.registry import get_runtime_config
         try:
@@ -152,168 +178,73 @@ async def _run_one(payload: dict) -> None:
 
         with tempfile.TemporaryDirectory(prefix="concord-exec-") as tmpdir:
             prepare_workspace(tmpdir)
-            try:
-                await _mount_workspace(project_id, file_id, tmpdir)
-            except Exception as e:
-                log.error("Failed to mount workspace for project %d: %s", project_id, e)
-                raise e
-
+            await _mount_workspace(project_id, file_id, tmpdir)
             async with AsyncSessionLocal() as db:
                 file_obj = await db.get(File, file_id)
                 if not file_obj or file_obj.project_id != project_id:
-                    raise Exception("Main file not found in DB")
+                    raise ValueError("Main file not found in DB")
                 main_path_rel = file_obj.path
-
             main_path = _workspace_path(tmpdir, main_path_rel)
-
             if source_text:
-                with open(main_path, "w", encoding="utf-8") as f:
-                    f.write(source_text)
-            if source_text and not debug:  # the debugger runs the file at its own path
-
-                # Also write to the runtime's expected 'main' file for building/running
-                from app.runtime.registry import RUNTIMES, Language
-                try:
-                    lang_enum = Language(language)
-                    runtime_config = RUNTIMES[lang_enum]
-                    main_runtime_path = os.path.join(tmpdir, f"main{runtime_config.file_extension}")
-                    with open(main_runtime_path, "w", encoding="utf-8") as f:
-                        f.write(source_text)
-                except Exception:
-                    pass
+                main_path.write_text(source_text, encoding="utf-8")
+                if not debug:
+                    _workspace_path(tmpdir, f"main{runtime_config.file_extension}").write_text(source_text, encoding="utf-8")
 
             if runtime_config.build_command:
-                await _transition(execution_id, ExecutionStatus.COMPILING)
+                if not await _transition(execution_id, ExecutionStatus.COMPILING):
+                    raise ExecutionCancelled
                 await _publish_status(project_id, execution_id, "compiling")
-                try:
-                    await asyncio.to_thread(
-                        sandbox.build, runtime_config.image, tmpdir, runtime_config.build_command, runtime_config.build_workdir
-                    )
-                except Exception as e:
-                    log.error("Build failed for execution %d: %s", execution_id, e)
-                    raise e
+                await _run_cancellable(partial(
+                    sandbox.build, runtime_config.image, tmpdir, runtime_config.build_command,
+                    runtime_config.build_workdir, execution_id=execution_id,
+                ), execution_id, cancel_event)
 
-            await _transition(execution_id, ExecutionStatus.RUNNING)
+            if not await _transition(execution_id, ExecutionStatus.RUNNING):
+                raise ExecutionCancelled
             await _publish_status(project_id, execution_id, "running")
-
-            result_holder: dict[str, RunResult | None] = {"result": None}
-            error_holder: dict[str, BaseException | None] = {"error": None}
-
-            def _run_in_thread() -> None:
-                try:
-                    result_holder["result"] = sandbox.run(
-                        code=source_text,
-                        language=language,
-                        timeout_seconds=get_settings().sandbox_timeout_seconds,
-                        workspace_dir=tmpdir,
-                        stdin=payload.get("stdin"),
-                    )
-                except Exception as e:
-                    error_holder["error"] = e
-
             if debug:
-                await _run_debug(payload, project_id, file_id, execution_id, main_path_rel, tmpdir, runtime_config, cancel_event)
+                await _run_debug(payload, project_id, file_id, execution_id, main_path_rel,
+                                 tmpdir, runtime_config, cancel_event)
                 return
-
-            runner_task = asyncio.create_task(asyncio.to_thread(_run_in_thread))
-            cancel_wait = asyncio.create_task(cancel_event.wait())
-            done, pending = await asyncio.wait(
-                {runner_task, cancel_wait}, return_when=asyncio.FIRST_COMPLETED
-            )
-
-            cancelled = False
-            if cancel_wait in done:
-                cancelled = True
-                runner_task.cancel()
-                try:
-                    await runner_task
-                except (asyncio.CancelledError, Exception):
-                    pass
-
-            if runner_task in done:
-                try:
-                    await runner_task
-                except Exception:
-                    log.exception("runner task errored")
-
-            if listener is not None:
-                listener.cancel()
-                try:
-                    await listener
-                except (asyncio.CancelledError, Exception):
-                    pass
-            if cancel_sub is not None:
-                try:
-                    await cancel_sub.close()
-                except Exception:
-                    pass
-
-            if cancelled:
-                await _transition(
-                    execution_id,
-                    ExecutionStatus.CANCELLED,
-                    finished_at=datetime.now(timezone.utc),
-                )
-                await _publish_status(project_id, execution_id, "cancelled")
-                return
-
-            if error_holder["error"] is not None:
-                await _transition(
-                    execution_id,
-                    ExecutionStatus.FAILED,
-                    stderr=str(error_holder["error"]),
-                    finished_at=datetime.now(timezone.utc),
-                )
-                await _publish_status(project_id, execution_id, "failed")
-                return
-
-            result = result_holder["result"]
-            assert result is not None
-            timed_out = result.timed_out
-            target = ExecutionStatus.TIMEOUT if timed_out else (
+            result = await _run_cancellable(partial(
+                sandbox.run, code=source_text, language=language,
+                timeout_seconds=get_settings().sandbox_timeout_seconds,
+                workspace_dir=tmpdir, stdin=payload.get("stdin"), execution_id=execution_id,
+            ), execution_id, cancel_event)
+            target = ExecutionStatus.TIMEOUT if result.timed_out else (
                 ExecutionStatus.COMPLETED if result.exit_code == 0 else ExecutionStatus.FAILED
             )
-
-            await _transition(
-                execution_id,
-                target,
-                exit_code=result.exit_code,
-                stdout=result.stdout,
-                stderr=result.stderr,
-                finished_at=datetime.now(timezone.utc),
-            )
-            await publish_project_event(
-                project_id,
-                {
-                    "type": "execution_output",
-                    "execution_id": execution_id,
-                    "stdout": result.stdout,
-                    "stderr": result.stderr,
-                    "exit_code": result.exit_code,
-                    "duration": result.duration_seconds,
-                },
-            )
-            await _publish_status(project_id, execution_id, target.value)
-
-    except Exception as e:
-        log.error("Unexpected error during execution %d: %s", execution_id, e, exc_info=True)
+            if await _transition(execution_id, target, exit_code=result.exit_code,
+                                 stdout=result.stdout, stderr=result.stderr,
+                                 finished_at=datetime.now(UTC)):
+                await publish_project_event(project_id, {
+                    "type": "execution_output", "execution_id": execution_id,
+                    "stdout": result.stdout, "stderr": result.stderr,
+                    "exit_code": result.exit_code, "duration": result.duration_seconds,
+                })
+                await _publish_status(project_id, execution_id, target.value)
+    except ExecutionCancelled:
+        if await _transition(execution_id, ExecutionStatus.CANCELLED,
+                             finished_at=datetime.now(UTC)):
+            await _publish_status(project_id, execution_id, "cancelled")
+    except Exception as exc:
+        log.exception("Unexpected error during execution %d", execution_id)
+        if await _transition(execution_id, ExecutionStatus.FAILED, stderr=f"Internal worker error: {exc}",
+                             finished_at=datetime.now(UTC)):
+            await _publish_status(project_id, execution_id, "failed")
+    finally:
+        if listener is not None:
+            listener.cancel()
+            await asyncio.gather(listener, return_exceptions=True)
+        if pubsub is not None:
+            await pubsub.aclose()
+        if cancel_sub is not None:
+            await cancel_sub.aclose()
         if debug:
             try:
                 await debug_control.clear_active(project_id, execution_id)
             except Exception:
                 log.warning("could not clear the active debug session", exc_info=True)
-        await _transition(
-            execution_id,
-            ExecutionStatus.FAILED,
-            stderr=f"Internal worker error: {e}",
-            finished_at=datetime.now(timezone.utc),
-        )
-        await _publish_status(project_id, execution_id, "failed")
-    finally:
-        if listener:
-            listener.cancel()
-        if cancel_sub:
-            await cancel_sub.close()
 
 async def _run_debug(
     payload: dict, project_id: int, file_id: int, execution_id: int, main_path: str,
@@ -350,7 +281,7 @@ async def _run_debug(
         await debug_control.set_state(execution_id, event)
 
     run = DebugRun(
-        target, DockerAdapter(sandbox.client, runtime_config.image, tmpdir), publish, commands,
+        target, DockerAdapter(sandbox.client, runtime_config.image, tmpdir, execution_id=execution_id), publish, commands,
         total_seconds=settings.sandbox_debug_timeout_seconds,
         idle_seconds=settings.sandbox_debug_idle_seconds,
         save_state=save_state,
@@ -363,7 +294,7 @@ async def _run_debug(
             await pubsub.unsubscribe()
             await sub.close()
         except Exception:
-            pass
+            log.warning("could not close debug command subscription", exc_info=True)
         try:
             await debug_control.clear_active(project_id, execution_id)
         except Exception:
@@ -385,8 +316,8 @@ async def _run_debug(
     elif outcome.reason == "timeout":
         stderr += f"\n[debugger] stopped after {settings.sandbox_debug_timeout_seconds} s\n"
 
-    now = datetime.now(timezone.utc)
-    await _transition(execution_id, target_status, exit_code=outcome.exit_code, stdout=outcome.stdout,
+    now = datetime.now(UTC)
+    changed = await _transition(execution_id, target_status, exit_code=outcome.exit_code, stdout=outcome.stdout,
                       stderr=stderr, finished_at=now)
     async with AsyncSessionLocal() as db:
         res = await db.execute(select(DebugSession).where(DebugSession.execution_id == execution_id))
@@ -394,6 +325,8 @@ async def _run_debug(
             ds.status = DebugStatus.STOPPED
             ds.ended_at = now
         await db.commit()
+    if not changed:
+        return
     await publish_project_event(project_id, {
         "type": "execution_output", "execution_id": execution_id, "stdout": outcome.stdout,
         "stderr": stderr, "exit_code": outcome.exit_code, "duration": outcome.duration_seconds,

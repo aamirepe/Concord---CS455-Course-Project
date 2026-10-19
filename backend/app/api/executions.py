@@ -287,4 +287,9 @@ async def cancel_execution(
 
     await remove_from_queue(execution_id)
     await signal_cancel(execution_id)
+    from app.realtime.execution_queue import publish_project_event
+
+    await publish_project_event(project_id, {
+        "type": "execution_status", "execution_id": execution_id, "status": "cancelled",
+    })
     return ExecutionOut.model_validate(execution)

@@ -17,6 +17,7 @@ from app.db.session import AsyncSessionLocal
 from app.models import DebugSession, DebugStatus, Execution, ExecutionStatus
 from app.realtime.execution_queue import signal_cancel
 from app.services.execution_state import change_status
+from app.services.sandbox import sandbox
 
 log = logging.getLogger(__name__)
 
@@ -73,6 +74,10 @@ async def sweep_once(db: AsyncSession) -> int:
     # Best effort: if the worker is alive but stuck, this makes it kill the
     # container. A Redis outage must not undo the DB state change above.
     for execution in changed:
+        try:
+            await asyncio.to_thread(sandbox.kill_execution, execution.id)
+        except Exception:
+            log.warning("Could not remove orphan containers for execution %d", execution.id, exc_info=True)
         try:
             await signal_cancel(execution.id)
         except Exception as e:

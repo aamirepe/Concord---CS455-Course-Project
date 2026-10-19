@@ -22,7 +22,9 @@ class DockerAdapter:
     DAP stream. stdin is written raw.
     """
 
-    def __init__(self, client: Any, image: str, workspace: str) -> None:
+    def __init__(self, client: Any, image: str, workspace: str,
+                 execution_id: int | None = None) -> None:
+        self.execution_id = execution_id
         self.client = client
         self.image = image
         self.workspace = workspace
@@ -38,6 +40,8 @@ class DockerAdapter:
 
         def create() -> tuple[Any, Any]:
             container = self.client.containers.create(
+                **({"name": f"concord-exec-{self.execution_id}"}
+                   if self.execution_id is not None else {}),
                 image=self.image,
                 entrypoint=["python", "-m", "debugpy.adapter"],
                 command=None,
