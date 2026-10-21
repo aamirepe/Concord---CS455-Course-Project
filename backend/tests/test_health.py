@@ -67,3 +67,31 @@ async def test_health_bounds_a_stalled_redis(client, health_redis):
         response = await client.get("/healthz")
     assert response.status_code == 200
     assert response.json()["redis"] == "down"
+
+
+async def test_health_bounds_a_stalled_database_query(client, health_redis, monkeypatch):
+    import asyncio
+
+    cancelled = asyncio.Event()
+
+    async def stalled_query(*args, **kwargs):
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+
+    session = AsyncMock()
+    session.__aenter__.return_value = session
+    session.execute.side_effect = stalled_query
+    monkeypatch.setattr(main.db_session, "AsyncSessionLocal", lambda: session)
+
+    async with asyncio.timeout(3):
+        response = await client.get("/healthz")
+
+    session.execute.assert_awaited_once()
+    assert cancelled.is_set()
+    assert response.status_code == 503
+    assert response.json() == {
+        "status": "degraded", "service": "concord-backend",
+        "database": "down", "redis": "ok", "queue_depth": 3,
+    }
