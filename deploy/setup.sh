@@ -26,7 +26,6 @@ if [ ! -f .env.production ]; then
 BACKEND_IMAGE=
 WORKER_IMAGE=
 FRONTEND_IMAGE=
-CONCORD_DOMAIN=
 CONFIG
 fi
 chmod 600 .env .env.production
