@@ -8,10 +8,12 @@ export default mergeConfig(
       environment: "jsdom",
       setupFiles: ["./src/test/setup.ts"],
       globals: false,
+      reporters: ["default", "junit"],
+      outputFile: { junit: "reports/junit.xml" },
       css: false,
       coverage: {
         provider: "v8",
-        reporter: ["text", "html", "lcov"],
+        reporter: ["text", "html", "lcov", "cobertura"],
         include: ["src/**/*.{ts,tsx}"],
         exclude: ["src/main.tsx", "src/vite-env.d.ts", "src/test/**"],
         // 96% statements / 91% branches / 85% functions on CI when these floors

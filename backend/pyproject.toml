@@ -29,6 +29,9 @@ testpaths = ["tests"]
 filterwarnings = ["ignore::DeprecationWarning"]
 
 [tool.coverage.run]
+source = ["app"]
+branch = true
+omit = ["*/tests/*", "*/alembic/*"]
 # SQLAlchemy's async layer runs queries in greenlets; without this, coverage on
 # Python 3.12 (CI) misses every line after the first await in a request handler.
 concurrency = ["greenlet", "thread"]

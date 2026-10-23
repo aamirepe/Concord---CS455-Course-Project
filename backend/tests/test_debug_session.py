@@ -250,3 +250,142 @@ async def test_a_failed_command_is_reported_not_fatal():
     run.paused = True
     commands.put_nowait({"command": "stop"})
     assert (await asyncio.wait_for(task, 5)).reason == "stopped"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stop_reason", ["step", "breakpoint"])
+async def test_step_location_does_not_wait_for_variables(monkeypatch, stop_reason):
+    class StepReasonAdapter(FakeAdapter):
+        def _event(self, event, body=None):
+            if event == "stopped" and body and body.get("reason") == "step":
+                body = {**body, "reason": stop_reason}
+            super()._event(event, body)
+
+    run, commands, events, _ = _session(StepReasonAdapter())
+    original_scopes = run._frame_scopes
+    inspecting = asyncio.Event()
+    cancelled = asyncio.Event()
+    calls = 0
+
+    async def delayed_scopes(frame_id):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return await original_scopes(frame_id)
+        inspecting.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+
+    monkeypatch.setattr(run, "_frame_scopes", delayed_scopes)
+    task = asyncio.create_task(run.run())
+    try:
+        await _until(events, "debug_paused")
+        commands.put_nowait({"command": "next", "username": "bob"})
+        stepped = await _until(events, "debug_paused", 2)
+        assert stepped["line"] == 3 and stepped["variables"] == []
+        await asyncio.wait_for(inspecting.wait(), 1)
+        await run._handle_command({"command": "pause"})
+        assert not cancelled.is_set()
+        commands.put_nowait({"command": "next", "username": "bob"})
+        assert (await _until(events, "debug_paused", 3))["line"] == 4
+        assert cancelled.is_set()
+        assert not any(e["type"] == "debug_frame" for e in events)
+        commands.put_nowait({"command": "stop"})
+        assert (await asyncio.wait_for(task, 1)).reason == "stopped"
+        assert run._details_task is None
+    finally:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+
+@pytest.mark.asyncio
+async def test_step_variables_update_the_frame_and_late_join_state():
+    run, commands, events, states = _session(FakeAdapter())
+    task = asyncio.create_task(run.run())
+    try:
+        await _until(events, "debug_paused")
+        commands.put_nowait({"command": "next", "username": "bob"})
+        paused = await _until(events, "debug_paused", 2)
+        frame = await _until(events, "debug_frame")
+        assert frame["frame_id"] == paused["stack"][0]["id"]
+        assert [v["name"] for v in frame["variables"]] == ["xs", "big"]
+        assert states[-1]["line"] == paused["line"] == 3
+        assert states[-1]["variables"] == frame["variables"]
+        assert states[-1]["scopes"] == frame["scopes"]
+        commands.put_nowait({"command": "stop"})
+        await asyncio.wait_for(task, 1)
+        assert states[-1] is None
+    finally:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+
+@pytest.mark.asyncio
+async def test_a_breakpoint_after_continue_keeps_complete_variables():
+    class BreakpointAdapter(FakeAdapter):
+        def _handle(self, req):
+            if req["command"] == "continue":
+                self._reply(req)
+                self._event("continued", {"threadId": 1})
+                self._event("stopped", {"reason": "breakpoint", "threadId": 1})
+            else:
+                super()._handle(req)
+
+    run, commands, events, _ = _session(BreakpointAdapter())
+    task = asyncio.create_task(run.run())
+    try:
+        await _until(events, "debug_paused")
+        commands.put_nowait({"command": "next"})
+        await _until(events, "debug_paused", 2)
+        commands.put_nowait({"command": "continue"})
+        breakpoint = await _until(events, "debug_paused", 3)
+        assert breakpoint["reason"] == "breakpoint"
+        assert [v["name"] for v in breakpoint["variables"]] == ["xs", "big"]
+        commands.put_nowait({"command": "stop"})
+        await asyncio.wait_for(task, 1)
+    finally:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+
+@pytest.mark.asyncio
+async def test_selecting_a_frame_cancels_pending_automatic_variables(monkeypatch):
+    run, commands, events, _ = _session(FakeAdapter())
+    original_scopes = run._frame_scopes
+    waiting = asyncio.Event()
+    cancelled = asyncio.Event()
+    calls = 0
+
+    async def delayed_top_frame(frame_id):
+        nonlocal calls
+        calls += 1
+        if frame_id == 5 and calls > 1:
+            waiting.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled.set()
+        return await original_scopes(frame_id)
+
+    monkeypatch.setattr(run, "_frame_scopes", delayed_top_frame)
+    task = asyncio.create_task(run.run())
+    try:
+        await _until(events, "debug_paused")
+        commands.put_nowait({"command": "next"})
+        await _until(events, "debug_paused", 2)
+        await asyncio.wait_for(waiting.wait(), 1)
+        commands.put_nowait({"command": "frame", "frame_id": 7})
+        assert (await _until(events, "debug_frame"))["frame_id"] == 7
+        assert cancelled.is_set()
+        assert len([e for e in events if e["type"] == "debug_frame"]) == 1
+        commands.put_nowait({"command": "stop"})
+        await asyncio.wait_for(task, 1)
+    finally:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
