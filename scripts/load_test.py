@@ -1,216 +1,173 @@
-"""Load test for the CRDT layer.
+"""Load test: ten concurrent editors and five simultaneous run requests per round.
 
-Two modes:
+Ten WebSocket clients edit one file of a running stack at typing speed while,
+at the same time, five run requests are submitted at once, round after round.
+The script prints one JSON document with
 
-  (default)   in-process convergence test.
-              Spawns N pycrdt.Doc instances ("clients") plus one server-side
-              room Doc. Fires `edits_per_client` random single-character
-              inserts from random clients; each edit is applied to the room
-              and rebroadcast to every OTHER client (exactly what the
-              gateway does). At the end, asserts that all clients and the
-              room have byte-identical text content.
+  * edit propagation latency, p50 and p99 (NFR-P1: p99 < 300 ms), and
+  * execution queue wait, p50 and p95 (NFR-P2: p95 < 1 s), measured as
+    ``started_at - queued_at`` of each run, the same definition as the metrics
+    endpoint,
 
-              This is the §20 acceptance test: it doesn't depend on the
-              WebSocket transport, the network, the worker, or docker —
-              it directly exercises the CRDT math + the room-manager
-              fanout pattern.
+and exits with status 1 if a target is missed, an edit never arrives or a run
+does not complete.
 
-  --wire      wire-protocol latency test (scripts/latency.py).
-              N real WebSocket clients, each logged in as a user, edit one
-              file of a running stack at typing speed. Each edit carries a
-              unique token, and every other client records when the token
-              reaches its copy: "A types, B sees it". Reports p50/p95/p99;
-              fails if any edit is lost or p99 >= 300 ms. This backs
-              FR4/NFR1 (<300 ms p99) and NFR2 (compare p99 across client
-              counts).
+It uses the pilot accounts (scripts/pilot.py) and the edit-latency probe
+(scripts/latency.py), so it runs wherever the pilot checks run:
 
-Usage:
-    # in-process (preferred; no docker required)
-    python scripts/load_test.py --clients 1 5 10 25
-
-    # wire, against a running stack (e.g. the pilot's demo accounts)
-    python scripts/load_test.py --wire --clients 2 5 10 --project 1 --file 1
+    scripts/pilot.sh up
+    docker compose exec -T backend python /scripts/load_test.py
+    docker compose exec -T backend python /scripts/load_test.py --rounds 5 --duration 60
 """
 from __future__ import annotations
 
 import argparse
 import asyncio
 import json
-import os
-import random
+import statistics
 import sys
 import time
+from datetime import datetime
 
-# Make the backend package importable so we can use the canonical crdt helpers
-# (which encapsulate the pycrdt 0.10.x API quirks: get_state() is the state
-# vector, get_update() is full state).
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
+from latency import TARGET_P99_MS, measure
+from pilot import Api, run_file, set_file_text
 
-from app.realtime.crdt import (  # noqa: E402
-    apply_update,
-    doc_to_bytes,
-    doc_to_text,
-    new_doc,
-)
-
-# `websockets` is only needed by --wire mode. Importing it lazily (inside
-# run_wire/_wire_client) keeps the default in-process mode dependency-free,
-# matching this script's own "no docker required" promise above.
+QUEUE_WAIT_P95_TARGET_S = 1.0
+LOAD_PROJECT = "Load test"
+EDIT_FILE = "edit.txt"
+RUN_FILE = "run.py"
+RUN_SOURCE = 'print("load test")\n'
+EDITOR_USERS = ["alice", "bob", "dave"]  # owner, editor, debugger: all may edit and run
 
 
-# ---------------------------------------------------------------------------
-# In-process convergence test
-# ---------------------------------------------------------------------------
+def percentile(values: list[float], p: float) -> float | None:
+    if not values:
+        return None
+    xs = sorted(values)
+    return xs[min(len(xs) - 1, round(p / 100 * (len(xs) - 1)))]
 
 
-def _random_insert_pos(text: str, rng: random.Random) -> int:
-    return rng.randint(0, len(text))
+def rounded(value: float | None, digits: int) -> float | None:
+    return round(value, digits) if value is not None else None
 
 
-def _make_room_and_clients(n_clients: int, initial: str) -> tuple[object, list[object]]:
-    """Mirror the gateway's per-room layout: one server Doc + N client Docs.
-
-    Each client gets a full-state sync from the room before any edits.
-    """
-    from pycrdt import Text  # local import keeps top of file clean
-
-    room = new_doc(initial)
-    clients = []
-    for _ in range(n_clients):
-        c = new_doc(initial)
-        apply_update(c, doc_to_bytes(room))
-        # touch the text binding so the doc is in a known state (the new_doc
-        # helper already does this, but be explicit for clarity)
-        c.get("monaco", type=Text)
-        clients.append(c)
-    return room, clients
+async def prepare(api: Api) -> tuple[int, int, int]:
+    """Sign in, make sure the load-test project exists and return (project, edit file, run file)."""
+    await api.login_all()
+    project = await api.project("alice", LOAD_PROJECT)
+    pid = project["id"]
+    await api.add_member(pid, "alice", "bob", "editor")
+    await api.add_member(pid, "alice", "dave", "debugger")
+    edit_file = await api.file(pid, "alice", EDIT_FILE)
+    run_file_ = await api.file(pid, "alice", RUN_FILE)
+    await set_file_text(api, pid, edit_file["id"], "alice", "")
+    await set_file_text(api, pid, run_file_["id"], "alice", RUN_SOURCE)
+    return pid, edit_file["id"], run_file_["id"]
 
 
-async def run_in_process(n_clients: int, edits_per_client: int, seed: int = 42) -> dict:
-    """Fire concurrent edits and assert byte-identical convergence.
+async def run_rounds(api: Api, pid: int, fid: int, rounds: int, runs: int) -> tuple[list[float], list[str]]:
+    """Submit ``runs`` executions at the same moment, ``rounds`` times; return queue waits and problems."""
+    waits: list[float] = []
+    problems: list[str] = []
+    for n in range(rounds):
+        users = [EDITOR_USERS[i % len(EDITOR_USERS)] for i in range(runs)]
+        outcomes = await asyncio.gather(
+            *(run_file(api, pid, fid, u, limit=120) for u in users), return_exceptions=True
+        )
+        for outcome in outcomes:
+            if isinstance(outcome, BaseException):
+                problems.append(f"round {n + 1}: {type(outcome).__name__}: {outcome}")
+            elif outcome["status"] != "completed" or not outcome.get("started_at"):
+                problems.append(f"round {n + 1}: run {outcome['id']} ended as {outcome['status']}")
+            else:
+                queued = datetime.fromisoformat(outcome["queued_at"])
+                started = datetime.fromisoformat(outcome["started_at"])
+                waits.append((started - queued).total_seconds())
+        await asyncio.sleep(1)
+    return waits, problems
 
-    Returns a dict with timing, success, and (if it converged) the common
-    text content. If it diverges, raises AssertionError with details.
-    """
-    from pycrdt import Text
 
-    rng = random.Random(seed)
-    initial = "hello world"
+async def load_test(args: argparse.Namespace) -> dict:
+    api = Api(args.api, args.ws)
+    try:
+        pid, edit_fid, run_fid = await prepare(api)
+        users = (EDITOR_USERS * args.editors)[: args.editors]
+        urls = [f"{args.ws}/ws/projects/{pid}/files/{edit_fid}?token={api.tokens[u]}" for u in users]
+        edits_per_client = max(1, int(args.duration / args.interval))
 
-    room, clients = _make_room_and_clients(n_clients, initial)
-    n_edits = n_clients * edits_per_client
+        started = time.monotonic()
+        edit_task = asyncio.create_task(measure(urls, edits_per_client=edits_per_client, interval=args.interval))
+        await asyncio.sleep(2)  # let the editors connect before the first burst of runs
+        waits, run_problems = await run_rounds(api, pid, run_fid, args.rounds, args.runs)
+        edits = await edit_task
+        elapsed = time.monotonic() - started
+    finally:
+        await api.close()
 
-    started = time.monotonic()
-    for i in range(n_edits):
-        client = clients[rng.randrange(n_clients)]
-        text_obj = client.get("monaco", type=Text)
-        before = str(text_obj)
-        pos = _random_insert_pos(before, rng)
-        ch = rng.choice("abcdefghijklmnopqrstuvwxyz ")
+    edit_p99 = edits.pct(99)
+    wait_p95 = percentile(waits, 95)
+    expected_runs = args.rounds * args.runs
+    failures = []
+    if edit_p99 is None or edit_p99 >= TARGET_P99_MS:
+        failures.append(f"edit propagation p99 {rounded(edit_p99, 1)} ms is not below {TARGET_P99_MS:.0f} ms")
+    if edits.missing:
+        failures.append(f"{edits.missing} of {edits.expected} edit deliveries never arrived")
+    failures.extend(edits.errors[:3])
+    if wait_p95 is None or wait_p95 >= QUEUE_WAIT_P95_TARGET_S:
+        failures.append(f"queue wait p95 {rounded(wait_p95, 3)} s is not below {QUEUE_WAIT_P95_TARGET_S:.0f} s")
+    failures.extend(run_problems[:5])
 
-        # Wire-format update: in production, the gateway sends a per-edit
-        # diff to peers. For a convergence test, doc_to_bytes (full state)
-        # is idempotent and produces identical results when each client
-        # applies it on top of the same base — which is exactly the
-        # "reconnect after a dropped broadcast" scenario.
-        update = doc_to_bytes(client)
-
-        # Server applies the update to the room and rebroadcasts to peers.
-        apply_update(room, update)
-        for other in clients:
-            if other is not client:
-                apply_update(other, update)
-
-    duration = time.monotonic() - started
-    reference = doc_to_text(room)
-    divergent = []
-    for idx, c in enumerate(clients):
-        if doc_to_text(c) != reference:
-            divergent.append((idx, doc_to_text(c)[:80]))
-
-    converged = not divergent
     return {
-        "mode": "in-process",
-        "clients": n_clients,
-        "edits_per_client": edits_per_client,
-        "total_edits": n_edits,
-        "duration_seconds": round(duration, 3),
-        "converged": converged,
-        "final_text_length": len(reference),
-        "divergent_clients": divergent,
+        "editors": args.editors,
+        "runs_per_round": args.runs,
+        "rounds": args.rounds,
+        "duration_seconds": round(elapsed, 1),
+        "edit_propagation": {
+            "requirement": "NFR-P1",
+            "edits": edits.edits,
+            "delivered": len(edits.latencies_ms),
+            "expected": edits.expected,
+            "p50_ms": rounded(edits.pct(50), 1),
+            "p99_ms": rounded(edit_p99, 1),
+            "max_ms": rounded(max(edits.latencies_ms) if edits.latencies_ms else None, 1),
+            "target_p99_ms": TARGET_P99_MS,
+        },
+        "queue_wait": {
+            "requirement": "NFR-P2",
+            "runs": len(waits),
+            "expected": expected_runs,
+            "p50_s": rounded(percentile(waits, 50), 3),
+            "p95_s": rounded(wait_p95, 3),
+            "max_s": rounded(max(waits) if waits else None, 3),
+            "mean_s": rounded(statistics.fmean(waits) if waits else None, 3),
+            "target_p95_s": QUEUE_WAIT_P95_TARGET_S,
+        },
+        "ok": not failures,
+        "failures": failures,
     }
 
 
-# ---------------------------------------------------------------------------
-# Wire-protocol latency test
-# ---------------------------------------------------------------------------
-
-
-async def run_wire(n_clients: int, edits_per_client: int, args: argparse.Namespace) -> dict:
-    """``n_clients`` users edit one file over the real WebSocket protocol; see scripts/latency.py."""
-    import httpx
-    from latency import measure
-
-    users = (args.users * n_clients)[:n_clients]
-    tokens: list[str] = []
-    async with httpx.AsyncClient(base_url=args.api, timeout=30) as http:
-        for u in users:
-            r = await http.post("/auth/login", json={"username": u, "password": args.password})
-            if r.status_code != 200:
-                raise SystemExit(f"can't log in as {u}: {r.status_code} {r.text[:200]}")
-            tokens.append(r.json()["access_token"])
-    urls = [f"{args.ws}/ws/projects/{args.project}/files/{args.file}?token={t}" for t in tokens]
-    started = time.monotonic()
-    result = await measure(urls, edits_per_client=edits_per_client, interval=args.interval)
-    return {"mode": "wire", "duration_seconds": round(time.monotonic() - started, 2), **result.summary()}
-
-
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
-
-
 def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--clients", type=int, nargs="+", default=[1, 5, 10, 25])
-    parser.add_argument("--edits", type=int, default=50, help="edits per client")
-    parser.add_argument("--wire", action="store_true", help="use WebSocket transport")
-    parser.add_argument(
-        "--seed", type=int, default=42, help="RNG seed (in-process mode only)"
-    )
-    wire = parser.add_argument_group("--wire options (a running stack)")
-    wire.add_argument("--api", default="http://localhost:8000")
-    wire.add_argument("--ws", default="ws://localhost:8000")
-    wire.add_argument("--users", nargs="+", default=["alice", "bob", "dave"],
-                      help="accounts that can edit the file; reused if there are more clients")
-    wire.add_argument("--password", default=os.environ.get("CONCORD_PASSWORD", "pilot-pass-123"))
-    wire.add_argument("--project", type=int, default=int(os.environ.get("CONCORD_PROJECT_ID", "1")))
-    wire.add_argument("--file", type=int, default=int(os.environ.get("CONCORD_FILE_ID", "1")))
-    wire.add_argument("--interval", type=float, default=0.05, help="seconds between one client's edits")
+    parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    parser.add_argument("--api", default="http://localhost:8000")
+    parser.add_argument("--ws", default="ws://localhost:8000")
+    parser.add_argument("--editors", type=int, default=10, help="concurrent editors on one file")
+    parser.add_argument("--runs", type=int, default=5, help="run requests submitted at the same moment")
+    parser.add_argument("--rounds", type=int, default=3, help="how many times the runs are submitted")
+    parser.add_argument("--duration", type=float, default=40, help="seconds the editors keep typing")
+    parser.add_argument("--interval", type=float, default=0.2, help="seconds between one editor's edits")
     args = parser.parse_args()
+    if args.editors < 2:
+        parser.error("--editors must be at least 2: latency needs someone to receive the edits")
 
-    all_ok = True
-    for n in args.clients:
-        if args.wire:
-            if n < 2:
-                print("  - skipping 1 client: latency needs someone to receive the edits", file=sys.stderr)
-                continue
-            result = asyncio.run(run_wire(n, args.edits, args))
-            ok = result["ok"]
-        else:
-            result = asyncio.run(run_in_process(n, args.edits, seed=args.seed))
-            ok = result["converged"]
-        print(json.dumps(result))
-        if not ok:
-            all_ok = False
-            print(f"  ✗ {n} clients FAILED", file=sys.stderr)
-        elif args.wire:
-            print(f"  ✓ {n} clients: p50={result['p50_ms']}ms p99={result['p99_ms']}ms "
-                  f"({result['delivered']}/{result['expected']} deliveries)", file=sys.stderr)
-        else:
-            print(f"  ✓ {n} clients converged", file=sys.stderr)
-
-    return 0 if all_ok else 1
+    result = asyncio.run(load_test(args))
+    print(json.dumps(result, indent=2))
+    if not result["ok"]:
+        for failure in result["failures"]:
+            print(f"  x {failure}", file=sys.stderr)
+        return 1
+    print("  ok: both latency targets met", file=sys.stderr)
+    return 0
 
 
 if __name__ == "__main__":
