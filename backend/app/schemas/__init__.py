@@ -1,10 +1,40 @@
 """Pydantic schemas (request/response models)."""
 from __future__ import annotations
 
+import unicodedata
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, ValidationInfo, field_validator
+
+
+class _ProjectPathModel(BaseModel):
+    @field_validator("path", "name", check_fields=False)
+    @classmethod
+    def _validate_project_path(cls, value: str | None, info: ValidationInfo) -> str | None:
+        if value is None:
+            return value
+
+        label = "folder name" if info.field_name == "name" else "file path"
+        if any(unicodedata.category(char) == "Cc" for char in value):
+            raise ValueError(f"{label} must not contain control characters")
+        if "\\" in value:
+            raise ValueError(f"{label} must use forward slashes, not backslashes")
+        if value.startswith("/") or (
+            len(value) >= 3 and value[0].isalpha() and value[1:3] == ":/"
+        ):
+            raise ValueError(f"{label} must be relative")
+        if info.field_name == "name" and "/" in value:
+            raise ValueError("folder name must not contain slashes")
+
+        segments = value.split("/")
+        if "" in segments:
+            raise ValueError(f"{label} must not contain empty segments")
+        if "." in segments:
+            raise ValueError(f"{label} must not contain '.' segments")
+        if ".." in segments:
+            raise ValueError(f"{label} must not contain '..' segments")
+        return value
 
 # --- Auth ---
 
@@ -50,13 +80,13 @@ class ProjectOut(BaseModel):
 # --- Folder ---
 
 
-class FolderCreate(BaseModel):
+class FolderCreate(_ProjectPathModel):
     name: str = Field(min_length=1, max_length=255)
     parent_id: int | None = None
 
 
-class FolderUpdate(BaseModel):
-    name: str | None = None
+class FolderUpdate(_ProjectPathModel):
+    name: str | None = Field(default=None, min_length=1, max_length=255)
     parent_id: int | None = None
 
 
@@ -135,12 +165,12 @@ class JoinRequestDecision(BaseModel):
 # --- File ---
 
 
-class FileCreate(BaseModel):
+class FileCreate(_ProjectPathModel):
     path: str = Field(min_length=1, max_length=512)
     folder_id: int | None = None
 
 
-class FileUpdate(BaseModel):
+class FileUpdate(_ProjectPathModel):
     path: str | None = Field(default=None, min_length=1, max_length=512)
     folder_id: int | None = None
 

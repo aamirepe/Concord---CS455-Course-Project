@@ -4,6 +4,73 @@ import pytest
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("bad_name", "message"),
+    [
+        ("", "at least 1 character"),
+        ("/absolute", "must be relative"),
+        ("..", "must not contain '..' segments"),
+        (".", "must not contain '.' segments"),
+        ("src/lib", "must not contain slashes"),
+        ("src\\lib", "must use forward slashes"),
+        ("src\x00lib", "must not contain control characters"),
+    ],
+    ids=[
+        "empty",
+        "leading-slash",
+        "parent-segment",
+        "current-segment",
+        "slash",
+        "backslash",
+        "control-character",
+    ],
+)
+async def test_folder_name_validation_rejects_create_and_rename(
+    client, project, bad_name, message
+):
+    headers = {"Authorization": f"Bearer {project['owner']['token']}"}
+    project_id = project["id"]
+    folder_id = (
+        await client.post(
+            f"/projects/{project_id}/folders", json={"name": "valid"}, headers=headers
+        )
+    ).json()["id"]
+
+    created = await client.post(
+        f"/projects/{project_id}/folders", json={"name": bad_name}, headers=headers
+    )
+    assert created.status_code == 422
+    assert message in created.text
+
+    renamed = await client.patch(
+        f"/projects/{project_id}/folders/{folder_id}",
+        json={"name": bad_name},
+        headers=headers,
+    )
+    assert renamed.status_code == 422
+    assert message in renamed.text
+
+
+@pytest.mark.asyncio
+async def test_valid_folder_names_are_accepted_on_create_and_rename(client, project):
+    headers = {"Authorization": f"Bearer {project['owner']['token']}"}
+    project_id = project["id"]
+
+    created = await client.post(
+        f"/projects/{project_id}/folders", json={"name": "src.main"}, headers=headers
+    )
+    assert created.status_code == 201, created.text
+
+    renamed = await client.patch(
+        f"/projects/{project_id}/folders/{created.json()['id']}",
+        json={"name": "tests-unit"},
+        headers=headers,
+    )
+    assert renamed.status_code == 200, renamed.text
+    assert renamed.json()["name"] == "tests-unit"
+
+
+@pytest.mark.asyncio
 async def test_folder_crud_round_trip(client, project):
     a = project["owner"]
     project_id = project["id"]
