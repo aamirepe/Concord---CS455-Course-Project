@@ -11,7 +11,7 @@ from common import TERMINAL_STATUSES, Event, PilotClient, argument_parser, print
 
 
 async def run(args) -> dict:
-    result: dict = {"blockers": [], "contenders": [], "cleanup": []}
+    result: dict = {"blockers": [], "contenders": [], "cleanup": [], "contention_valid": False, "contention_issues": []}
     owned_ids: list[int] = []
     async with PilotClient(args.api, args.ws, args.timeout) as api:
         try:
@@ -57,10 +57,21 @@ async def run(args) -> dict:
                 )
                 if any(isinstance(item, BaseException) for item in submissions):
                     raise RuntimeError("A contender submission failed; see submitted contenders and cleanup")
+                result["blockers_after_submissions"] = [
+                    await api.request("GET", api.project_path(f"/executions/{item['execution_id']}"))
+                    for item in result["blockers"]
+                ]
+                for state in result["blockers_after_submissions"]:
+                    if state["status"] != "running":
+                        result["contention_issues"].append(f"Blocker {state['id']} was {state['status']} after contender submissions")
+                release_started = time.perf_counter()
+                result["release_started_monotonic_s"] = release_started
                 result["blocker_release"] = []
                 for blocker in result["blockers"]:
                     response = await api.request("POST", api.project_path(f"/executions/{blocker['execution_id']}/cancel"))
                     result["blocker_release"].append(response)
+                    if response["status"] != "cancelled":
+                        result["contention_issues"].append(f"Blocker {blocker['execution_id']} returned {response['status']} when released")
 
                 async def observe(item: dict) -> None:
                     target = item["execution_id"]
@@ -84,6 +95,16 @@ async def run(args) -> dict:
                 result["start_order"] = [item["role"] for item in sorted(started, key=lambda item: item["start_received_monotonic_s"])]
                 result["order_basis"] = "Receipt order of RUNNING events; debugger refers to dave's role, not a debug session"
                 result["events"] = [asdict(event) for event in events.events if event.payload.get("execution_id") in owned_ids]
+                blocker_ids = {item["execution_id"] for item in result["blockers"]}
+                contender_ids = {item["execution_id"] for item in result["contenders"]}
+                premature = [event for event in events.events if event.monotonic_s < release_started and (
+                    (event.payload.get("execution_id") in blocker_ids and event.payload.get("status") in TERMINAL_STATUSES)
+                    or (event.payload.get("execution_id") in contender_ids and event.payload.get("status") == "running")
+                )]
+                result["premature_events"] = [asdict(event) for event in premature]
+                if premature:
+                    result["contention_issues"].append("A blocker finished or a contender started before intentional blocker release")
+                result["contention_valid"] = not result["contention_issues"]
         except Exception as exc:
             result["error"] = str(exc)
         finally:
@@ -95,7 +116,7 @@ async def run(args) -> dict:
                     result["cleanup"].append({"execution_id": execution_id, "status": current["status"]})
                 except Exception as exc:
                     result["cleanup"].append({"execution_id": execution_id, "error": str(exc)})
-    result["complete"] = "error" not in result and len(result.get("start_order", [])) == 3 and not any("event_error" in item for item in result["contenders"])
+    result["complete"] = "error" not in result and result["contention_valid"] and len(result.get("start_order", [])) == 3 and not any("event_error" in item for item in result["contenders"])
     return result
 
 
