@@ -17,12 +17,13 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import tempfile
 import time
 from dataclasses import dataclass
 
 import docker
-from docker.errors import APIError, ContainerError, ImageNotFound
+from docker.errors import APIError, ContainerError, ImageNotFound, NotFound
 
 from app.core.config import get_settings
 from app.runtime.registry import RuntimeConfig, get_runtime_config
@@ -83,6 +84,7 @@ class SandboxRunner:
         debug: bool = False,
         workspace_dir: str | None = None,
         stdin: str | None = None,
+        execution_id: int | None = None,
     ) -> RunResult:
         """Run `code` in a fresh sandbox container. Returns captured output.
 
@@ -113,10 +115,10 @@ class SandboxRunner:
                     f.write(code)
                 write_stdin(tmpdir, stdin)
                 prepare_workspace(tmpdir)
-                return self._run_with_dir(tmpdir, code, language, timeout, debug, runtime_config)
+                return self._run_with_dir(tmpdir, code, language, timeout, debug, runtime_config, execution_id)
 
         write_stdin(tmpdir, stdin)
-        return self._run_with_dir(tmpdir, code, language, timeout, debug, runtime_config)
+        return self._run_with_dir(tmpdir, code, language, timeout, debug, runtime_config, execution_id)
 
     def _run_with_dir(
         self,
@@ -126,6 +128,7 @@ class SandboxRunner:
         timeout: int,
         debug: bool,
         runtime_config: RuntimeConfig,
+        execution_id: int | None = None,
     ) -> RunResult:
         # Prepare entrypoint based on debug mode. ``override`` replaces the
         # image's own ENTRYPOINT (the Python image has one), which would
@@ -145,6 +148,7 @@ class SandboxRunner:
         started = time.monotonic()
         try:
             container = self.client.containers.run(
+                **({"name": f"concord-exec-{execution_id}"} if execution_id is not None else {}),
                 image=runtime_config.image,
                 entrypoint=override,
                 command=None if override else entrypoint,
@@ -211,7 +215,8 @@ class SandboxRunner:
             duration_seconds=duration,
         )
 
-    def build(self, image: str, workspace_dir: str, build_command: list[str], workdir: str) -> None:
+    def build(self, image: str, workspace_dir: str, build_command: list[str], workdir: str,
+              *, execution_id: int | None = None) -> None:
         """Execute a build command in the sandbox.
 
         Args:
@@ -223,6 +228,7 @@ class SandboxRunner:
         try:
             # Run build in a container with read-write access to workspace
             build_container = self.client.containers.run(
+                **({"name": f"concord-build-{execution_id}"} if execution_id is not None else {}),
                 image=image,
                 command=build_command,
                 network_disabled=(get_settings().sandbox_network == "none"),
@@ -261,6 +267,30 @@ class SandboxRunner:
         except (APIError, ContainerError) as exc:
             log.exception("Build container failed")
             raise RuntimeError(f"Build failed: {exc}") from exc
+
+    def execution_container_ids(self) -> set[int]:
+        """Find execution IDs that still have a named run or build container."""
+        execution_ids = set()
+        containers = self.client.containers.list(
+            all=True, filters={"name": "^/concord-(exec|build)-"},
+        )
+        for container in containers:
+            match = re.fullmatch(r"concord-(?:exec|build)-([1-9][0-9]{0,9})", container.name)
+            if match:
+                execution_id = int(match.group(1))
+                # Execution primary keys use PostgreSQL's signed Integer type.
+                if execution_id <= 2**31 - 1:
+                    execution_ids.add(execution_id)
+        return execution_ids
+
+    def kill_execution(self, execution_id: int) -> None:
+        """Remove run, build and debugger containers, including after a worker dies."""
+        for prefix in ("concord-exec", "concord-build"):
+            try:
+                container = self.client.containers.get(f"{prefix}-{int(execution_id)}")
+                container.remove(force=True)
+            except NotFound:
+                continue
 
     def healthcheck(self) -> bool:
         """Cheap check that the Docker daemon is reachable from the worker."""
