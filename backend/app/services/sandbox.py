@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import tempfile
 import time
 from dataclasses import dataclass
@@ -262,6 +263,21 @@ class SandboxRunner:
         except (APIError, ContainerError) as exc:
             log.exception("Build container failed")
             raise RuntimeError(f"Build failed: {exc}") from exc
+
+    def execution_container_ids(self) -> set[int]:
+        """Find execution IDs that still have a named run or build container."""
+        execution_ids = set()
+        containers = self.client.containers.list(
+            all=True, filters={"name": "^/concord-(exec|build)-"},
+        )
+        for container in containers:
+            match = re.fullmatch(r"concord-(?:exec|build)-([1-9][0-9]{0,9})", container.name)
+            if match:
+                execution_id = int(match.group(1))
+                # Execution primary keys use PostgreSQL's signed Integer type.
+                if execution_id <= 2**31 - 1:
+                    execution_ids.add(execution_id)
+        return execution_ids
 
     def kill_execution(self, execution_id: int) -> None:
         """Remove run, build and debugger containers, including after a worker dies."""

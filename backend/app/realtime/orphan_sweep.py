@@ -71,13 +71,30 @@ async def sweep_once(db: AsyncSession) -> int:
         await db.commit()
         log.info("Marked %d orphaned executions as failed", len(changed))
 
-    # Best effort: if the worker is alive but stuck, this makes it kill the
-    # container. A Redis outage must not undo the DB state change above.
-    for execution in changed:
+    cleanup_ids = {execution.id for execution in changed}
+    try:
+        container_ids = await asyncio.to_thread(sandbox.execution_container_ids)
+    except Exception:
+        log.warning("Could not list execution containers; will retry next sweep", exc_info=True)
+        container_ids = set()
+    remaining = container_ids - cleanup_ids
+    if remaining:
+        # Terminal rows and surviving containers persist across backend restarts.
+        # Redis delivery and a previous Docker failure cannot lose this retry.
+        cleanup_ids.update((await db.scalars(select(Execution.id).where(
+            Execution.id.in_(remaining),
+            Execution.status.in_((ExecutionStatus.COMPLETED, ExecutionStatus.FAILED,
+                                  ExecutionStatus.TIMEOUT, ExecutionStatus.CANCELLED)),
+        ))).all())
+
+    for execution_id in sorted(cleanup_ids):
         try:
-            await asyncio.to_thread(sandbox.kill_execution, execution.id)
+            await asyncio.to_thread(sandbox.kill_execution, execution_id)
         except Exception:
-            log.warning("Could not remove orphan containers for execution %d", execution.id, exc_info=True)
+            log.warning("Could not remove orphan containers for execution %d", execution_id, exc_info=True)
+
+    # A Redis outage must not undo the DB state change or block Docker retries.
+    for execution in changed:
         try:
             await signal_cancel(execution.id)
         except Exception as e:
