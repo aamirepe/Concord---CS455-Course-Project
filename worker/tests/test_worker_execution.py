@@ -162,6 +162,16 @@ async def _cancel_real_execution(db, no_op_publish, monkeypatch, *, language="py
 
     bus = CancelBus()
     monkeypatch.setattr(worker.aioredis_async, "from_url", lambda *a, **kw: bus)
+    if language == "cpp":
+        prepare = worker.prepare_workspace
+
+        def compiler_workspace(path):
+            prepare(path)
+            # Host CI users cannot chown to the sandbox uid. Only this
+            # disposable test directory needs compiler write access.
+            os.chmod(path, 0o777)  # noqa: S103
+
+        monkeypatch.setattr(worker, "prepare_workspace", compiler_workspace)
     if phase == "compiling":
         original = get_runtime_config
         config = replace(original("cpp"), build_command=["sh", "-c", "sleep 30; g++ -o /workspace/main.out /workspace/main.cpp"])
