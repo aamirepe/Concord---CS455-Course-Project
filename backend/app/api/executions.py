@@ -264,18 +264,15 @@ async def cancel_execution(
     if not execution or execution.project_id != project_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Execution not found")
 
-    if execution.status in {
-        ExecutionStatus.COMPLETED,
-        ExecutionStatus.FAILED,
-        ExecutionStatus.TIMEOUT,
-        ExecutionStatus.CANCELLED,
-    }:
-        return ExecutionOut.model_validate(execution)
-
-    if not await change_status(
-        db, execution, ExecutionStatus.CANCELLED, by="api", finished_at=datetime.now(UTC),
-    ):
+    while execution.status not in FINISHED_STATUSES:
+        if await change_status(
+            db, execution, ExecutionStatus.CANCELLED, by="api", finished_at=datetime.now(UTC),
+        ):
+            break
+        # A worker can advance to another active state before our conditional
+        # write. Retry from the refreshed state until cancelled or finished.
         await db.refresh(execution)
+    else:
         return ExecutionOut.model_validate(execution)
     await db.commit()
     await db.refresh(execution)
