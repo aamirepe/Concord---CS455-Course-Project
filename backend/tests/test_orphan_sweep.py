@@ -8,15 +8,29 @@ mid-execution) existed but was never scheduled from app startup, so FR12
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
 import pytest
+from docker.errors import APIError, NotFound
 from httpx import AsyncClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.realtime.orphan_sweep as orphan_sweep_module
 from app.core.config import get_settings
-from app.models import DebugSession, DebugStatus, Execution, ExecutionStatus
+from app.db.session import AsyncSessionLocal
+from app.models import DebugSession, DebugStatus, Execution, ExecutionEvent, ExecutionStatus
 from app.realtime.orphan_sweep import ORPHAN_THRESHOLD, sweep_once
+
+
+@pytest.fixture(autouse=True)
+def docker_client(monkeypatch):
+    client = Mock()
+    client.containers.list.return_value = []
+    client.containers.get.side_effect = NotFound("No such container")
+    monkeypatch.setattr(orphan_sweep_module.sandbox, "_client", client)
+    return client
 
 
 @pytest.fixture(autouse=True)
@@ -196,3 +210,126 @@ async def test_stopped_debug_session_does_not_protect_stale_execution(db, projec
     await db.refresh(execution)
     assert execution.status == ExecutionStatus.FAILED
     assert cancelled == [execution.id]
+
+
+async def test_sweeper_appends_failed_event_in_same_transaction(db, project):
+    run = Execution(project_id=project["id"], file_id=project["file_id"],
+                    status=ExecutionStatus.RUNNING,
+                    started_at=datetime.now(UTC) - ORPHAN_THRESHOLD - timedelta(seconds=1))
+    db.add(run)
+    await db.commit()
+    assert await sweep_once(db) == 1
+    event = (await db.execute(select(ExecutionEvent).where(
+        ExecutionEvent.execution_id == run.id))).scalar_one()
+    assert event.event_type == "failed"
+    assert event.payload["from"] == "running"
+    assert event.payload["to"] == "failed"
+    assert event.payload["by"] == "sweeper"
+    assert await sweep_once(db) == 0
+
+
+@pytest.mark.parametrize("prefix", ["concord-exec", "concord-build"])
+@pytest.mark.parametrize("redis_down", [False, True])
+async def test_sweep_retries_failed_container_removal_after_restart(
+    db, project, docker_client, monkeypatch, prefix, redis_down,
+):
+    run = Execution(
+        project_id=project["id"], file_id=project["file_id"],
+        status=ExecutionStatus.RUNNING,
+        started_at=datetime.now(UTC) - ORPHAN_THRESHOLD - timedelta(seconds=1),
+    )
+    db.add(run)
+    await db.commit()
+    name = f"{prefix}-{run.id}"
+    container = SimpleNamespace(name=name, remove=Mock())
+    remaining = {name: container}
+
+    def get_container(target):
+        if target not in remaining:
+            raise NotFound("No such container")
+        return remaining[target]
+
+    def remove_container(*, force):
+        assert force
+        if container.remove.call_count == 1:
+            raise APIError("Docker temporarily unavailable")
+        del remaining[name]
+
+    container.remove.side_effect = remove_container
+    docker_client.containers.get.side_effect = get_container
+    docker_client.containers.list.side_effect = lambda **kwargs: list(remaining.values())
+    signal = AsyncMock(side_effect=ConnectionError("Redis unavailable") if redis_down else None)
+    monkeypatch.setattr(orphan_sweep_module, "signal_cancel", signal)
+
+    assert await sweep_once(db) == 1
+    await db.refresh(run)
+    assert run.status == ExecutionStatus.FAILED
+    finished_at = run.finished_at
+    assert name in remaining
+    assert container.remove.call_count == 1
+
+    # A fresh session has no memory of the failed Docker request.
+    async with AsyncSessionLocal() as restarted_db:
+        assert await sweep_once(restarted_db) == 0
+        assert remaining == {}
+        assert await sweep_once(restarted_db) == 0
+    assert container.remove.call_count == 2
+    signal.assert_awaited_once_with(run.id)
+    await db.refresh(run)
+    assert run.status == ExecutionStatus.FAILED
+    assert run.finished_at == finished_at
+    events = (await db.execute(select(ExecutionEvent).where(
+        ExecutionEvent.execution_id == run.id))).scalars().all()
+    assert len(events) == 1
+    assert events[0].payload["by"] == "sweeper"
+
+
+async def test_sweep_retries_terminal_cleanup_after_container_listing_recovers(
+    db, project, docker_client,
+):
+    run = Execution(project_id=project["id"], file_id=project["file_id"], status=ExecutionStatus.FAILED)
+    db.add(run)
+    await db.commit()
+    container = SimpleNamespace(name=f"concord-exec-{run.id}", remove=Mock())
+    docker_client.containers.list.side_effect = [APIError("Docker offline"), [container]]
+
+    def get_container(name):
+        if name == container.name:
+            return container
+        raise NotFound("No such container")
+
+    docker_client.containers.get.side_effect = get_container
+
+    assert await sweep_once(db) == 0
+    container.remove.assert_not_called()
+    async with AsyncSessionLocal() as restarted_db:
+        assert await sweep_once(restarted_db) == 0
+    container.remove.assert_called_once_with(force=True)
+
+
+async def test_terminal_reconciliation_preserves_live_and_unrelated_containers(
+    db, project, docker_client, monkeypatch,
+):
+    runs = [Execution(
+        project_id=project["id"], file_id=project["file_id"], status=status,
+        started_at=datetime.now(UTC),
+    ) for status in ExecutionStatus]
+    db.add_all(runs)
+    await db.commit()
+    live_debug = await _debug_execution(db, project, timedelta(minutes=6), DebugStatus.PAUSED)
+    names = [f"{prefix}-{run.id}" for run in [*runs, live_debug]
+             for prefix in ("concord-exec", "concord-build")]
+    names += ["unrelated-container", "concord-exec-999999", "concord-exec-1-extra",
+              "concord-build-0", "concord-exec-9999999999999999999999"]
+    docker_client.containers.list.return_value = [SimpleNamespace(name=name) for name in names]
+    kill = Mock()
+    monkeypatch.setattr(orphan_sweep_module.sandbox, "kill_execution", kill)
+    assert await sweep_once(db) == 0
+    terminal = {ExecutionStatus.COMPLETED, ExecutionStatus.FAILED,
+                ExecutionStatus.TIMEOUT, ExecutionStatus.CANCELLED}
+    assert {call.args[0] for call in kill.call_args_list} == {
+        run.id for run in runs if run.status in terminal
+    }
+    assert kill.call_count == len(terminal)
+    await db.refresh(live_debug)
+    assert live_debug.status == ExecutionStatus.RUNNING

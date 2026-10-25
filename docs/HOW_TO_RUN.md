@@ -7,6 +7,9 @@ command and I'll explain what it does.
 
 Total time: ~15 minutes if you have nothing installed.
 
+For a public server with TLS, use [the production deployment guide](deployment.md).
+This guide uses the local development Compose stack.
+
 ## 0. What you need to install first
 
 You need three things on your computer before we start. Skip any you

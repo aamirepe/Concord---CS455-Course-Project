@@ -77,3 +77,76 @@ def test_no_input_means_eof_not_a_hang():
     result = sandbox.run("try:\n    input()\nexcept EOFError:\n    print('eof')\n", timeout_seconds=10)
     assert result.stdout.strip() == "eof"
     assert not result.timed_out
+
+
+@pytest.mark.skipif(not DOCKER_TESTS, reason="set DOCKER_TESTS=1 to run")
+@pytest.mark.parametrize("language, code", [
+    ("python", "print(open('/proc/self/status').read())"),
+    ("nodejs", "console.log(require('fs').readFileSync('/proc/self/status', 'utf8'))"),
+])
+def test_process_has_no_capabilities_or_new_privileges(language, code):
+    result = sandbox.run(code, language=language, timeout_seconds=5)
+    assert result.exit_code == 0, result.stderr
+    fields = dict(line.split(":", 1) for line in result.stdout.splitlines() if ":" in line)
+    assert fields["CapEff"].strip() == "0000000000000000"
+    assert fields["NoNewPrivs"].strip() == "1"
+
+
+@pytest.mark.skipif(not DOCKER_TESTS, reason="set DOCKER_TESTS=1 to run")
+def test_cpp_compiler_and_binary_work_without_capabilities(tmp_path):
+    import os
+
+    code = '#include <fstream>\n#include <iostream>\nint main() { std::ifstream s("/proc/self/status"); std::cout << s.rdbuf(); }\n'
+    (tmp_path / "main.cpp").write_text(code)
+    # A disposable compiler workspace must be writable by the container uid.
+    os.chmod(tmp_path, 0o777)  # noqa: S103
+    sandbox.build("concord-sandbox-cpp:latest", str(tmp_path),
+                  ["g++", "-std=c++17", "-o", "/workspace/main.out", "/workspace/main.cpp"], "/workspace")
+    result = sandbox.run(code, language="cpp", workspace_dir=str(tmp_path))
+    assert result.exit_code == 0, result.stderr
+    fields = dict(line.split(":", 1) for line in result.stdout.splitlines() if ":" in line)
+    assert fields["CapEff"].strip() == "0000000000000000"
+    assert fields["NoNewPrivs"].strip() == "1"
+
+
+@pytest.mark.skipif(not DOCKER_TESTS, reason="set DOCKER_TESTS=1 to run")
+@pytest.mark.asyncio
+async def test_debug_adapter_has_no_capabilities_or_new_privileges(tmp_path):
+    from app.debug.docker_adapter import DockerAdapter
+    from app.services.sandbox import prepare_workspace
+
+    prepare_workspace(str(tmp_path))
+    adapter = DockerAdapter(sandbox.client, "concord-sandbox:latest", str(tmp_path))
+    try:
+        await adapter.start()
+        adapter.container.reload()
+        assert adapter.container.attrs["HostConfig"]["CapDrop"] == ["ALL"]
+        assert "no-new-privileges" in adapter.container.attrs["HostConfig"]["SecurityOpt"]
+        result = adapter.container.exec_run(["cat", "/proc/1/status"])
+        assert result.exit_code == 0
+        fields = dict(line.split(":", 1) for line in result.output.decode().splitlines() if ":" in line)
+        assert fields["CapEff"].strip() == "0000000000000000"
+        assert fields["NoNewPrivs"].strip() == "1"
+    finally:
+        await adapter.stop()
+
+
+def test_every_sandbox_run_build_and_validation_request_is_hardened(tmp_path, monkeypatch):
+    from unittest.mock import Mock
+    from app.services.sandbox import SandboxRunner
+
+    runner = SandboxRunner()
+    client = Mock()
+    container = client.containers.run.return_value
+    container.wait.return_value = {"StatusCode": 0}
+    container.logs.return_value = b""
+    runner._client = client
+    monkeypatch.setattr("app.services.sandbox.prepare_workspace", lambda _: None)
+    runner.run("print('ok')")
+    runner.build("image", str(tmp_path), ["true"], "/workspace")
+    assert runner.validate_code("console.log('ok')", "nodejs")
+    assert runner.validate_code("int main() {}", "cpp")
+    assert client.containers.run.call_count == 4
+    for call in client.containers.run.call_args_list:
+        assert call.kwargs["cap_drop"] == ["ALL"]
+        assert call.kwargs["security_opt"] == ["no-new-privileges"]
