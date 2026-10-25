@@ -1,4 +1,7 @@
-# Concord — Runbook
+# Concord Runbook
+
+For production configuration, deployment, backup and rollback, see
+[the deployment guide](deployment.md). The commands below use the local development stack.
 
 ## Local development
 
@@ -36,15 +39,16 @@ docker compose exec backend alembic downgrade -1
 
 ```bash
 curl -fsS http://localhost:8000/healthz
-curl -fsS http://localhost:8000/metrics/executions/summary
+# Inspect status, database, redis and queue_depth in the JSON response.
 ```
 
-If `/healthz` returns OK but executions are stuck, check:
+Database failure returns 503. Redis failure returns 200 with `status=degraded`;
+check the body as well as the HTTP code. If executions are stuck, check:
 1. Are workers connected to Redis? `docker compose ps worker` should show
-   them healthy. Tail logs: `docker compose logs -f worker`.
+   them running. Tail logs: `docker compose logs -f worker`.
 2. Is the sandbox image built? `docker images | grep concord-sandbox`.
-3. Did the per-tenant docker socket go away?
-   `docker exec backend docker ps` — if that fails, the host's dockerd is down.
+3. Can the worker access the Docker socket? Check `docker info` on the host
+   and worker logs for connection or permission errors.
 
 ## Common failure modes
 
