@@ -6,12 +6,12 @@ import base64
 import json
 from datetime import UTC, datetime, timedelta
 
+import jwt
 import pytest
 from fastapi.routing import APIRoute
 from httpx import AsyncClient
 from httpx_ws import WebSocketDisconnect, aconnect_ws
 from httpx_ws.transport import ASGIWebSocketTransport
-from jose import jwt
 from pycrdt import Doc, Text
 from wsproto.events import TextMessage
 
