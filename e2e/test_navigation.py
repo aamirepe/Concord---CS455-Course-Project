@@ -20,8 +20,12 @@ def test_tabs_quick_open_and_search(open_as, api):
     # Ctrl+P back to the first file
     alice.click(".view-lines")
     alice.keyboard.press("Control+p")
-    alice.get_by_label("File name").fill("nav_a")
-    alice.keyboard.press("Enter")
+    quick_open = alice.get_by_role("dialog", name="Open a file")
+    file_name = quick_open.get_by_role("combobox", name="File name")
+    file_name.fill("nav_a")
+    expect(quick_open.get_by_role("option", selected=True)).to_have_text("e2e_nav_a.py")
+    file_name.press("Enter")
+    expect(quick_open).not_to_be_visible()
     expect(alice.locator(".editor-tab.active")).to_contain_text("e2e_nav_a.py")
 
     # search from the other file, jump to the match

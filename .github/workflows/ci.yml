@@ -118,6 +118,7 @@ jobs:
         run: docker compose exec -T backend python /scripts/pilot.py check
       - name: Browser tests
         run: |
+          mkdir -p e2e/out
           docker run --rm --network host --ipc=host -v "$PWD/e2e:/e2e" -w /e2e \
             mcr.microsoft.com/playwright/python:v1.60.0-noble \
             sh -c "pip install -q --break-system-packages -r requirements.txt && pytest -q -p no:cacheprovider"
