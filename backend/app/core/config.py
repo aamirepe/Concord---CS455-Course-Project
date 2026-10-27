@@ -21,6 +21,8 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+asyncpg://concord:concord@postgres:5432/concord"
     redis_url: str = "redis://redis:6379/0"
+    login_max_failures: int = 5
+    login_lockout_seconds: int = 900
 
     # Sandbox
     sandbox_image: str = "concord-sandbox:latest"

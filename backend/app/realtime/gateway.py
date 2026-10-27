@@ -39,6 +39,7 @@ import base64
 import json
 import logging
 import time
+from time import time_ns
 from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
@@ -361,9 +362,12 @@ async def _forward_exec_events(conn: Connection, project_id: int) -> None:
         async for data in subscribe_project_events(project_id):
             try:
                 log.debug("Forwarding exec event to project %d: %s", project_id, data)
-                conn.send(
-                    json.dumps({"op": "exec_event", "event": json.loads(data)})
-                )
+                event = json.loads(data)
+                timing = event.pop("_timing", None)
+                conn.send(json.dumps({"op": "exec_event", "event": event}))
+                if timing and event.get("type") == "debug_paused":
+                    log.debug("debug_step stage=gateway_queued execution=%s trace=%s at_ns=%s",
+                              event.get("execution_id"), timing.get("id"), time_ns())
             except Exception:
                 log.exception("Error sending exec event to WS")
                 return

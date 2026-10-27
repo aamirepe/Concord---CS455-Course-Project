@@ -2,7 +2,8 @@
 
 Two real browsers (Chromium via Playwright) against a running stack with the
 pilot's demo accounts: co-editing, Save/history/restore, tabs/quick open/search,
-the console with program input, and debugging together.
+the console with program input, run status and cancelling in every console,
+the metrics page, viewer restrictions, and debugging together.
 
 ```bash
 scripts/pilot.sh up          # or any stack with `pilot.py seed` run

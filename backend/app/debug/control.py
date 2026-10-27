@@ -16,9 +16,14 @@ Events go the other way through the usual project event channel
 from __future__ import annotations
 
 import json
+import logging
+from time import time_ns
 from typing import Any
+from uuid import uuid4
 
 from app.realtime.execution_queue import async_redis
+
+log = logging.getLogger(__name__)
 
 COMMAND_CHANNEL_PREFIX = "concord:debugcmd:"
 ACTIVE_KEY = "concord:debug:active:{}"
@@ -71,4 +76,10 @@ async def get_state(execution_id: int) -> dict | None:
 
 async def send_command(execution_id: int, command: dict) -> int:
     """Publish a command to the worker; returns how many listeners got it (0: none)."""
-    return int(await _redis().publish(COMMAND_CHANNEL_PREFIX + str(execution_id), json.dumps(command)))
+    if command.get("command") not in STEP_COMMANDS:
+        return int(await _redis().publish(COMMAND_CHANNEL_PREFIX + str(execution_id), json.dumps(command)))
+    command = {**command, "_timing": {"id": uuid4().hex, "published_ns": time_ns()}}
+    listeners = int(await _redis().publish(COMMAND_CHANNEL_PREFIX + str(execution_id), json.dumps(command)))
+    log.debug("debug_step stage=command_published execution=%s trace=%s at_ns=%s",
+              execution_id, command["_timing"]["id"], command["_timing"]["published_ns"])
+    return listeners
